@@ -8360,8 +8360,6 @@ function renderDriveFolderConfig() {
             if (!driveFolderConfigData[type]) driveFolderConfigData[type] = {};
             driveFolderConfigData[type].prefix = e.target.value;
         };
-        row.appendChild(prefixInput);
-
         const baseInput = document.createElement('input');
         baseInput.type = 'text';
         baseInput.placeholder = 'Base Folder ID';
@@ -8383,7 +8381,7 @@ function renderDriveFolderConfig() {
         };
 
         row.appendChild(label);
-        // prefixInput is appended above
+        row.appendChild(prefixInput);
         row.appendChild(baseInput);
         row.appendChild(tmplInput);
         container.appendChild(row);
