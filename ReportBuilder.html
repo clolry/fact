@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #005ea2; --border: #dadce0;
+      --bg: #f4f6f8; --card: #ffffff;
+      --text: #202124; --sub: #5f6368;
+      --danger: #d93025; --success: #188038;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 { margin: 0; font-size: 1.1rem; color: var(--accent); }
+    .layout {
+      display: flex;
+      flex-grow: 1;
+      overflow: hidden;
+    }
+
+    /* LEFT PANEL — Template List */
+    .panel-left {
+      width: 260px;
+      background: var(--card);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .panel-left-header {
+      padding: 15px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+    }
+    .template-list { overflow-y: auto; flex-grow: 1; }
+    .template-item {
+      padding: 12px 15px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .template-item:hover { background: #f0f7ff; }
+    .template-item.active { background: #e8f0fe; border-left: 3px solid var(--accent); }
+    .template-name { font-weight: 600; font-size: 0.9rem; }
+    .template-meta { font-size: 0.75rem; color: var(--sub); margin-top: 3px; }
+    .schedule-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      background: #e8f0fe;
+      color: var(--accent);
+    }
+
+    /* RIGHT PANEL — Editor */
+    .panel-right {
+      flex-grow: 1;
+      overflow-y: auto;
+      padding: 25px;
+    }
+    .placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--sub);
+      gap: 10px;
+    }
+    .placeholder-icon { font-size: 3rem; }
+
+    /* Form Styles */
+    .form-section {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      border: 1px solid var(--border);
+    }
+    .form-section-title {
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: var(--accent);
+      margin-bottom: 15px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .full { grid-column: 1 / -1; }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--sub);
+      margin-bottom: 5px;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    textarea { resize: vertical; min-height: 80px; }
+
+    /* Checkbox Group */
+    .check-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 5px;
+    }
+    .check-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: all 0.15s;
+      background: var(--card);
+    }
+    .check-pill:hover { border-color: var(--accent); }
+    .check-pill input { display: none; }
+    .check-pill.checked {
+      background: #e8f0fe;
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 9px 18px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 0.85rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: #f1f3f4; }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+    .btn-primary:hover { filter: brightness(110%); }
+    .btn-danger { color: var(--danger); border-color: var(--danger); }
+    .btn-danger:hover { background: #fce8e6; }
+    .btn-success { background: var(--success); color: white; border-color: var(--success); }
+
+    /* Action Bar */
+    .action-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .action-bar-right { display: flex; gap: 10px; }
+
+    /* Result Box */
+    .result-box {
+      background: #e6f4ea;
+      border: 1px solid #a8d5b5;
+      border-radius: 6px;
+      padding: 15px 20px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .result-box.error {
+      background: #fce8e6;
+      border-color: #f5c6c3;
+    }
+    .result-links { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+    .result-link {
+      padding: 6px 14px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      text-decoration: none;
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    /* Last Run Info */
+    .last-run {
+      font-size: 0.75rem;
+      color: var(--sub);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📊 Report Builder</h1>
+  <span id="header-status" style="font-size:0.85rem; color:var(--sub);"></span>
+</div>
+
+<div class="layout">
+
+  <!-- LEFT: Template List -->
+  <div class="panel-left">
+    <div class="panel-left-header">
+      <span>Templates</span>
+      <button class="btn btn-primary" onclick="newTemplate()" style="padding:5px 12px;">+ New</button>
+    </div>
+    <div class="template-list" id="template-list">
+      <div style="padding:20px; text-align:center; color:var(--sub); font-size:0.85rem;">
+        Loading...
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Editor -->
+  <div class="panel-right" id="editor-panel">
+    <div class="placeholder">
+      <div class="placeholder-icon">📋</div>
+      <div style="font-weight:600;">Select a template or create a new one</div>
+      <div style="font-size:0.85rem;">Reports can be generated on demand or scheduled automatically</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let templates = [];
+  let currentId = null;
+  let configData = null; // Stores types, stages, owners from main app
+
+  window.onload = () => {
+    loadTemplates();
+    loadConfigData();
+  };
+
+  function loadConfigData() {
+    google.script.run
+      .withSuccessHandler(data => { 
+          configData = data; 
+          if (document.getElementById('r_name')) {
+              const currentTemplate = templates.find(x => x.id === currentId);
+              renderEditor(currentTemplate);
+          }
+      })
+      .withFailureHandler(err => console.error('Config load failed:', err))
+      .getBootstrap();
+  }
+
+  function loadTemplates() {
+    google.script.run
+      .withSuccessHandler(data => {
+        templates = data || [];
+        renderTemplateList();
+      })
+      .withFailureHandler(err => {
+        document.getElementById('template-list').innerHTML =
+          `<div style="padding:15px;color:red;font-size:0.85rem;">Error: ${err.message}</div>`;
+      })
+      .getReportTemplates();
+  }
+
+  function renderTemplateList() {
+    const list = document.getElementById('template-list');
+    if (templates.length === 0) {
+      list.innerHTML = `<div style="padding:20px;text-align:center;color:var(--sub);font-size:0.85rem;">
+        No templates yet.<br>Click "+ New" to create one.
+      </div>`;
+      return;
+    }
+
+    list.innerHTML = templates.map(t => `
+      <div class="template-item ${t.id === currentId ? 'active' : ''}"
+           onclick="selectTemplate('${t.id}')">
+        <div class="template-name">${t.name}</div>
+        <div class="template-meta">
+          ${t.outputType} &bull;
+          <span class="schedule-badge">${t.schedule || 'Manual'}</span>
+        </div>
+        <div class="last-run">Last run: ${t.lastRun}</div>
+      </div>
+    `).join('');
+  }
+
+  function selectTemplate(id) {
+    currentId = id;
+    const t = templates.find(x => x.id === id);
+    if (!t) return;
+    renderTemplateList(); // Update active state
+    renderEditor(t);
+  }
+
+  function newTemplate() {
+    currentId = null;
+    renderTemplateList();
+    renderEditor(null);
+  }
+
+function renderEditor(template) {
+  const f = template || {};
+  const filters = f.filters || {};
+
+  // Build owner options from configData if available
+  const ownerOptions = configData
+    ? configData.projects
+        .map(p => p.Owner)
+        .filter(Boolean)
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .sort()
+    : [];
+  const assignedOptions = configData
+  ? [...new Set(
+      configData.projects
+        .flatMap(p => (p.Assigned || '').split(',').map(a => a.trim()))
+        .filter(Boolean)
+    )].sort()
+  : [];
+  const typeOptions = configData ? (configData.config.types || []) : [];
+  const stageOptions = configData ? (configData.config.stages || []) : [];
+
+  const buildPills = (options, selectedArr, groupName) =>
+    options.map(opt => `
+      <label class="check-pill ${(selectedArr || []).includes(opt) ? 'checked' : ''}"
+             onclick="togglePill(this)">
+        <input type="checkbox" name="${groupName}" value="${opt}"
+               ${(selectedArr || []).includes(opt) ? 'checked' : ''}>
+        ${opt}
+      </label>
+    `).join('');
+
+  document.getElementById('editor-panel').innerHTML = `
+    <div class="action-bar">
+      <h2 style="margin:0; font-size:1.1rem;">
+        ${template ? `Editing: ${template.name}` : 'New Report Template'}
+      </h2>
+      <div class="action-bar-right">
+        ${template ? `<button class="btn btn-danger" onclick="deleteTemplate()">🗑️ Delete</button>` : ''}
+        <button class="btn" onclick="saveTemplate()">💾 Save</button>
+        ${template ? `<button class="btn btn-success" onclick="runNow()">▶️ Run Now</button>` : ''}
+      </div>
+    </div>
+
+    <div id="result-box" class="result-box"></div>
+
+    <!-- Basic Info -->
+    <div class="form-section">
+      <div class="form-section-title">Basic Information</div>
+      <div class="form-grid">
+        <div class="full">
+          <label>Report Name</label>
+          <input type="text" id="r_name" value="${f.name || ''}"
+                 placeholder="e.g. Weekly Status Report">
+        </div>
+        <div>
+          <label>Output Format</label>
+          <select id="r_output">
+            <option value="Doc"   ${f.outputType === 'Doc'   ? 'selected' : ''}>Google Doc</option>
+            <option value="Sheet" ${f.outputType === 'Sheet' ? 'selected' : ''}>Google Sheet</option>
+            <option value="Both"  ${f.outputType === 'Both'  ? 'selected' : ''}>Both</option>
+          </select>
+        </div>
+<div class="full">
+  <label>Schedule</label>
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+
+    <!-- Frequency -->
+    <div>
+      <label style="font-size:0.75rem; color:var(--sub); font-weight:600;">
+        Frequency
+      </label>
+      <select id="r_schedule" onchange="updateScheduleUI()">
+        <option value="None"    ${f.schedule === 'None'    ? 'selected' : ''}>
+          Manual Only
+        </option>
+        <option value="Daily"   ${f.schedule === 'Daily'   ? 'selected' : ''}>
+          Daily
+        </option>
+        <option value="Weekly"  ${f.schedule === 'Weekly'  ? 'selected' : ''}>
+          Weekly
+        </option>
+        <option value="Monthly" ${f.schedule === 'Monthly' ? 'selected' : ''}>
+          Monthly
+        </option>
+      </select>
+    </div>
+
+    <!-- Day of Week (shown for Weekly) -->
+    <div id="schedule-dow-group" style="display:none;">
+      <label style="font-size:0.75rem; color:var(--sub); font-weight:600;">
+        Day of Week
+      </label>
+      <select id="r_schedule_dow" onchange="updateScheduleUI()">
+        <option value="1" ${f.scheduleDow == 1 ? 'selected' : ''}>Monday</option>
+        <option value="2" ${f.scheduleDow == 2 ? 'selected' : ''}>Tuesday</option>
+        <option value="3" ${f.scheduleDow == 3 ? 'selected' : ''}>Wednesday</option>
+        <option value="4" ${f.scheduleDow == 4 ? 'selected' : ''}>Thursday</option>
+        <option value="5" ${f.scheduleDow == 5 ? 'selected' : ''}>Friday</option>
+        <option value="6" ${f.scheduleDow == 6 ? 'selected' : ''}>Saturday</option>
+        <option value="0" ${f.scheduleDow == 0 ? 'selected' : ''}>Sunday</option>
+      </select>
+    </div>
+
+    <!-- Day of Month (shown for Monthly) -->
+    <div id="schedule-dom-group" style="display:none;">
+      <label style="font-size:0.75rem; color:var(--sub); font-weight:600;">
+        Day of Month
+      </label>
+      <select id="r_schedule_dom" onchange="updateScheduleUI()">
+        ${Array.from({length: 28}, (_, i) => i + 1).map(d =>
+          `<option value="${d}" ${f.scheduleDom == d ? 'selected' : ''}>${d}</option>`
+        ).join('')}
+      </select>
+    </div>
+
+    <!-- Time of Day (shown for any schedule except None) -->
+    <div id="schedule-time-group" style="display:none;">
+      <label style="font-size:0.75rem; color:var(--sub); font-weight:600;">
+        Time (approximate)
+      </label>
+      <select id="r_schedule_hour" onchange="updateScheduleUI()">
+        <option value="6"  ${f.scheduleHour == 6  ? 'selected' : ''}>
+          6:00 AM
+        </option>
+        <option value="7"  ${f.scheduleHour == 7  ? 'selected' : ''}>
+          7:00 AM
+        </option>
+        <option value="8"  ${f.scheduleHour == 8  ? 'selected' : ''}>
+          8:00 AM (Default)
+        </option>
+        <option value="9"  ${f.scheduleHour == 9  ? 'selected' : ''}>
+          9:00 AM
+        </option>
+        <option value="12" ${f.scheduleHour == 12 ? 'selected' : ''}>
+          12:00 PM
+        </option>
+        <option value="17" ${f.scheduleHour == 17 ? 'selected' : ''}>
+          5:00 PM
+        </option>
+      </select>
+    </div>
+
+  </div>
+
+  <!-- Next Run Preview -->
+  <div id="schedule-preview"
+       style="margin-top:8px; font-size:0.82rem; color:var(--sub);
+              font-style:italic; min-height:18px;">
+  </div>
+</div>
+        <div class="full">
+          <label>Email Recipients (comma separated)</label>
+          <input type="text" id="r_recipients"
+                 value="${f.recipients || ''}"
+                 placeholder="name@agency.gov, name2@agency.gov">
+        </div>
+        <div class="full">
+          <label>Email Message (optional)</label>
+          <textarea id="r_email_message" rows="3"
+                    placeholder="Add a custom message to include in the report email...
+        e.g. This is your weekly status report. Please review and follow up on any overdue items."
+                    style="resize:vertical;">${f.emailMessage || ''}</textarea>
+        </div>
+        <div class="full">
+          <label>Output Folder ID (optional — leave blank to auto-create)</label>
+          <input type="text" id="r_folder"
+                 value="${f.outputFolderId || ''}"
+                 placeholder="Google Drive Folder ID">
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="form-section">
+      <div class="form-section-title">Filters</div>
+      <div class="form-grid">
+        <div class="full">
+          <label>Owners (leave blank for all)</label>
+          <div class="check-group" id="owner-pills">
+            ${buildPills(ownerOptions, filters.owners, 'owners')}
+          </div>
+        </div>
+        <div class="full">
+          <label>Assigned Team Members (leave blank for all)</label>
+          <div class="check-group" id="assigned-pills">
+            ${buildPills(assignedOptions, filters.assignedMembers, 'assignedMembers')}
+          </div>
+        </div>
+        <div class="full">
+          <label>Item Types</label>
+          <div class="check-group" id="type-pills">
+            ${buildPills(typeOptions, filters.types, 'types')}
+          </div>
+        </div>
+        <div class="full">
+          <label>Statuses</label>
+          <div class="check-group" id="status-pills">
+            ${buildPills(stageOptions, filters.statuses, 'statuses')}
+          </div>
+        </div>
+        <div>
+          <label>Internal Due — From</label>
+          <input type="date" id="r_date_from" value="${filters.dateFrom || ''}">
+        </div>
+        <div>
+          <label>Internal Due — To</label>
+          <input type="date" id="r_date_to" value="${filters.dateTo || ''}">
+        </div>
+        <div>
+          <label>Exec Status</label>
+          <select id="r_exec_status">
+            <option value="">All</option>
+            ${(configData ? configData.config.execs : [])
+              .map(e => `<option value="${e}"
+                         ${filters.execStatus === e ? 'selected' : ''}>${e}</option>`)
+              .join('')}
+          </select>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding-top:20px;">
+          <input type="checkbox" id="r_overdue_only" style="width:auto;"
+                 ${filters.overdueOnly ? 'checked' : ''}>
+          <label for="r_overdue_only"
+                 style="margin:0; font-weight:normal; cursor:pointer;">
+            Overdue items only
+          </label>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding-top:20px;">
+          <input type="checkbox" id="r_include_archived" style="width:auto;"
+                 ${filters.includeArchived ? 'checked' : ''}>
+          <label for="r_include_archived"
+                 style="margin:0; font-weight:normal; cursor:pointer;">
+            Include archived items
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Field Selection -->
+    <div class="form-section">
+      <div class="form-section-title">Fields to Include in Report</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div style="font-size:0.8rem; font-weight:700; color:var(--sub);
+                    grid-column:1/-1; padding-bottom:4px;
+                    border-bottom:1px solid var(--border); margin-bottom:4px;">
+          Always Included: ID, Title, Status
+        </div>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_type" style="width:auto;" checked>
+          Type
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_owner" style="width:auto;" checked>
+          Owner
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_assigned" style="width:auto;" checked>
+          Assigned Team
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_exec_status" style="width:auto;" checked>
+          Exec Status
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_int_due" style="width:auto;" checked>
+          Internal Due Date
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_due_date" style="width:auto;" checked>
+          Final Due Date
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_rec_date" style="width:auto;">
+          Received Date
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_status_summary" style="width:auto;" checked>
+          Status Summary
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_drive_links" style="width:auto;" checked>
+          Attachments / Links
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_requestor" style="width:auto;">
+          Requestor
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_data_call_no" style="width:auto;">
+          Data Call No.
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_urgency" style="width:auto;">
+          Urgency
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;
+                      font-size:0.85rem; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" id="rf_complexity" style="width:auto;">
+          Complexity
+        </label>
+      </div>
+    </div>
+  `;
+
+  // ── RESTORE SAVED FIELD SELECTIONS ──────────────────────────────────────
+  // This runs AFTER innerHTML is set so the checkboxes exist in the DOM.
+  // Uses saved values from the template, falling back to sensible defaults
+  // if the template predates the field selection feature.
+  if (f.filters && f.filters.fields) {
+    const savedFields = f.filters.fields;
+    const fieldMap = {
+      'rf_type':          savedFields.type          ?? true,
+      'rf_owner':         savedFields.owner         ?? true,
+      'rf_assigned':      savedFields.assigned      ?? true,
+      'rf_exec_status':   savedFields.execStatus    ?? true,
+      'rf_int_due':       savedFields.intDue        ?? true,
+      'rf_due_date':      savedFields.dueDate       ?? true,
+      'rf_rec_date':      savedFields.recDate       ?? false,
+      'rf_status_summary':savedFields.statusSummary ?? true,
+      'rf_drive_links':   savedFields.driveLinks    ?? true,
+      'rf_requestor':     savedFields.requestor     ?? false,
+      'rf_data_call_no':  savedFields.dataCallNo    ?? false,
+      'rf_urgency':       savedFields.urgency       ?? false,
+      'rf_complexity':    savedFields.complexity    ?? false
+    };
+    Object.entries(fieldMap).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = val;
+    });
+  }
+  updateScheduleUI();
+}
+
+  function togglePill(label) {
+    const cb = label.querySelector('input');
+    cb.checked = !cb.checked;
+    label.classList.toggle('checked', cb.checked);
+  }
+
+  function getCheckedValues(name) {
+    return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
+                .map(cb => cb.value);
+  }
+
+function buildFiltersFromForm() {
+  return {
+    owners:          getCheckedValues('owners'),
+    types:           getCheckedValues('types'),
+    statuses:        getCheckedValues('statuses'),
+    assignedMembers: getCheckedValues('assignedMembers'),  // ← ADD
+    dateFrom:        document.getElementById('r_date_from')?.value || '',
+    dateTo:          document.getElementById('r_date_to')?.value || '',
+    execStatus:      document.getElementById('r_exec_status')?.value || '',
+    overdueOnly:     document.getElementById('r_overdue_only')?.checked || false,
+    includeArchived: document.getElementById('r_include_archived')?.checked || false,
+    fields: {
+      type:          document.getElementById('rf_type')?.checked ?? true,
+      owner:         document.getElementById('rf_owner')?.checked ?? true,
+      assigned:      document.getElementById('rf_assigned')?.checked ?? true,
+      execStatus:    document.getElementById('rf_exec_status')?.checked ?? true,
+      intDue:        document.getElementById('rf_int_due')?.checked ?? true,
+      dueDate:       document.getElementById('rf_due_date')?.checked ?? true,
+      recDate:       document.getElementById('rf_rec_date')?.checked ?? false,
+      statusSummary: document.getElementById('rf_status_summary')?.checked ?? true,
+      driveLinks:    document.getElementById('rf_drive_links')?.checked ?? true,
+      requestor:     document.getElementById('rf_requestor')?.checked ?? false,
+      dataCallNo:    document.getElementById('rf_data_call_no')?.checked ?? false,
+      urgency:       document.getElementById('rf_urgency')?.checked ?? false,
+      complexity:    document.getElementById('rf_complexity')?.checked ?? false
+    }
+  };
+}
+
+function saveTemplate() {
+  const name = document.getElementById('r_name')?.value?.trim();
+  if (!name) { alert('Please enter a report name.'); return; }
+
+  const template = {
+    id:             currentId || '',
+    name,
+    outputType:     document.getElementById('r_output').value,
+    schedule:       document.getElementById('r_schedule').value,
+    scheduleDow:    parseInt(document.getElementById('r_schedule_dow')?.value  || '1'),
+    scheduleDom:    parseInt(document.getElementById('r_schedule_dom')?.value  || '1'),
+    scheduleHour:   parseInt(document.getElementById('r_schedule_hour')?.value || '8'),
+    recipients:     document.getElementById('r_recipients').value,
+    emailMessage:   document.getElementById('r_email_message')?.value || '',  // ← ADD
+    outputFolderId: document.getElementById('r_folder').value,
+    filters:        buildFiltersFromForm()
+  };
+
+  const btn = event.target;
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(result => {
+      btn.textContent = '💾 Save';
+      btn.disabled = false;
+      currentId = result.id;
+      loadTemplates();
+      document.getElementById('header-status').textContent =
+        `✅ Saved at ${new Date().toLocaleTimeString()}`;
+      setTimeout(() => {
+        document.getElementById('header-status').textContent = '';
+      }, 3000);
+    })
+    .withFailureHandler(err => {
+      btn.textContent = '💾 Save';
+      btn.disabled = false;
+      alert('Save failed: ' + err.message);
+    })
+    .saveReportTemplate(template);
+}
+  function runNow() {
+    if (!currentId) { alert('Save the template first.'); return; }
+
+    const btn = event.target;
+    btn.textContent = '⏳ Generating...';
+    btn.disabled = true;
+
+    const resultBox = document.getElementById('result-box');
+    resultBox.style.display = 'none';
+    resultBox.className = 'result-box';
+
+    google.script.run
+      .withSuccessHandler(result => {
+        btn.textContent = '▶️ Run Now';
+        btn.disabled = false;
+
+        resultBox.style.display = 'block';
+
+        if (result.docUrl || result.sheetUrl) {
+          resultBox.className = 'result-box';
+          let linksHtml = '';
+          if (result.docUrl) {
+            linksHtml += `<a href="${result.docUrl}" target="_blank" class="result-link">📄 Open Doc</a>`;
+          }
+          if (result.sheetUrl) {
+            linksHtml += `<a href="${result.sheetUrl}" target="_blank" class="result-link">📊 Open Sheet</a>`;
+          }
+          resultBox.innerHTML = `
+            <strong>✅ Report generated!</strong> ${result.message}
+            <div class="result-links">${linksHtml}</div>
+          `;
+        } else {
+          resultBox.className = 'result-box error';
+          resultBox.innerHTML = `<strong>ℹ️</strong> ${result.message}`;
+        }
+
+        loadTemplates(); // Refresh last run timestamp
+      })
+      .withFailureHandler(err => {
+        btn.textContent = '▶️ Run Now';
+        btn.disabled = false;
+        resultBox.style.display = 'block';
+        resultBox.className = 'result-box error';
+        resultBox.innerHTML = `<strong>❌ Error:</strong> ${err.message}`;
+      })
+      .generateReport(currentId);
+  }
+
+  function deleteTemplate() {
+    if (!currentId) return;
+    const t = templates.find(x => x.id === currentId);
+    if (!confirm(`Delete report template "${t?.name}"? This cannot be undone.`)) return;
+
+    google.script.run
+      .withSuccessHandler(() => {
+        currentId = null;
+        loadTemplates();
+        document.getElementById('editor-panel').innerHTML = `
+          <div class="placeholder">
+            <div class="placeholder-icon">📋</div>
+            <div style="font-weight:600;">Template deleted</div>
+          </div>
+        `;
+      })
+      .withFailureHandler(err => alert('Delete failed: ' + err.message))
+      .deleteReportTemplate(currentId);
+  }
+  /**
+ * Shows/hides schedule sub-fields based on frequency selection
+ * and updates the next run preview.
+ */
+function updateScheduleUI() {
+  const freq = document.getElementById('r_schedule')?.value;
+
+  const dowGroup  = document.getElementById('schedule-dow-group');
+  const domGroup  = document.getElementById('schedule-dom-group');
+  const timeGroup = document.getElementById('schedule-time-group');
+  const preview   = document.getElementById('schedule-preview');
+
+  if (!dowGroup) return;
+
+  // Show/hide sub-fields
+  dowGroup.style.display  = freq === 'Weekly'  ? 'block' : 'none';
+  domGroup.style.display  = freq === 'Monthly' ? 'block' : 'none';
+  timeGroup.style.display = (freq && freq !== 'None') ? 'block' : 'none';
+
+  // Update preview text
+  if (!freq || freq === 'None') {
+    preview.textContent = 'This report will only run when you click Run Now.';
+    return;
+  }
+
+  const hour = parseInt(document.getElementById('r_schedule_hour')?.value || '8');
+  const timeLabel = hour < 12
+    ? `${hour}:00 AM`
+    : hour === 12
+    ? '12:00 PM'
+    : `${hour - 12}:00 PM`;
+
+  const days = ['Sunday','Monday','Tuesday','Wednesday',
+                'Thursday','Friday','Saturday'];
+
+  let nextRunText = '';
+
+  if (freq === 'Daily') {
+    nextRunText = `Runs every day at ${timeLabel}.`;
+    const next = calculateNextRunDate_js(freq, null, null, hour);
+    nextRunText += ` Next run: ${next.toLocaleDateString('en-US', {
+      weekday:'short', month:'short', day:'numeric'
+    })}`;
+  }
+
+  if (freq === 'Weekly') {
+    const dow = parseInt(document.getElementById('r_schedule_dow')?.value || '1');
+    nextRunText = `Runs every ${days[dow]} at ${timeLabel}.`;
+    const next = calculateNextRunDate_js(freq, dow, null, hour);
+    nextRunText += ` Next run: ${next.toLocaleDateString('en-US', {
+      weekday:'short', month:'short', day:'numeric'
+    })}`;
+  }
+
+  if (freq === 'Monthly') {
+    const dom = parseInt(document.getElementById('r_schedule_dom')?.value || '1');
+    const suffix = dom === 1 ? 'st' : dom === 2 ? 'nd' : dom === 3 ? 'rd' : 'th';
+    nextRunText = `Runs on the ${dom}${suffix} of every month at ${timeLabel}.`;
+    const next = calculateNextRunDate_js(freq, null, dom, hour);
+    nextRunText += ` Next run: ${next.toLocaleDateString('en-US', {
+      weekday:'short', month:'short', day:'numeric'
+    })}`;
+  }
+
+  if (preview) preview.textContent = nextRunText;
+}
+
+/**
+ * Client-side version of next run date calculation for preview purposes.
+ * Mirrors the server-side calculateNextRunDate_ logic.
+ */
+function calculateNextRunDate_js(freq, dow, dom, hour) {
+  const now = new Date();
+  const target = new Date();
+  target.setHours(hour || 8, 0, 0, 0);
+
+  if (freq === 'Daily') {
+    if (target <= now) target.setDate(target.getDate() + 1);
+    return target;
+  }
+
+  if (freq === 'Weekly') {
+    const currentDow = target.getDay();
+    let daysUntil = (dow - currentDow + 7) % 7;
+    if (daysUntil === 0 && target <= now) daysUntil = 7;
+    target.setDate(target.getDate() + daysUntil);
+    return target;
+  }
+
+  if (freq === 'Monthly') {
+    target.setDate(dom);
+    if (target <= now) target.setMonth(target.getMonth() + 1);
+    return target;
+  }
+
+  return target;
+}
+</script>
+</body>
+</html>

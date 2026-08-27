@@ -1,0 +1,297 @@
+<div id="wf-builder-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+  <div class="modal" style="width: 800px; max-width: 95%; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-header">
+      <h3 style="margin:0;">Workflow Templates</h3>
+      <button onclick="document.getElementById('wf-builder-overlay').style.display='none'" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+    </div>
+    
+    <div class="modal-body" style="padding: 20px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom: 20px;">
+        <p style="margin:0; color:#555;">Manage automated workflow templates that route tasks for approval.</p>
+        <button class="btn-primary" onclick="openWfEditor()">+ New Local Workflow</button>
+      </div>
+
+      <table style="width:100%; border-collapse: collapse; margin-bottom: 20px;">
+        <thead>
+          <tr style="background:#f1f3f4; text-align:left; border-bottom:2px solid #ccc;">
+            <th style="padding:10px;">Name</th>
+            <th style="padding:10px;">Applies To</th>
+            <th style="padding:10px;">Scope</th>
+            <th style="padding:10px;">Steps</th>
+            <th style="padding:10px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="wf-list-body">
+          <tr><td colspan="5" style="text-align:center; padding:20px;">Loading templates...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="wf-editor-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:2010; align-items:center; justify-content:center;">
+  <div class="modal" style="width: 600px; max-width: 95%;">
+    <div class="modal-header">
+      <h3 id="wf-editor-title" style="margin:0;">Edit Workflow</h3>
+      <button onclick="document.getElementById('wf-editor-overlay').style.display='none'" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <input type="hidden" id="wf-edit-id">
+      
+      <div class="form-group">
+        <label>Workflow Name</label>
+        <input type="text" id="wf-edit-name" placeholder="e.g. Data Call Review">
+      </div>
+      <div class="form-group">
+        <label>Applies To</label>
+        <div id="wf-edit-appliesto-container" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:5px;"></div>
+      </div>
+      
+      <h4>Steps</h4>
+      <div id="wf-edit-steps" style="background:#f8f9fa; padding:15px; border-radius:6px; margin-bottom:15px; border:1px solid #ddd;">
+        <!-- Steps will be injected here -->
+      </div>
+      <button class="btn" type="button" onclick="addWfStep()" style="margin-bottom:15px;">+ Add Step</button>
+      
+      <div id="wf-edit-status" style="color:var(--success); font-weight:bold; margin-bottom:10px; display:none;">Saved!</div>
+    </div>
+    <div class="modal-footer" style="padding: 15px 20px; border-top: 1px solid #eee; display:flex; justify-content:flex-end; gap:10px;">
+      <button class="btn" onclick="document.getElementById('wf-editor-overlay').style.display='none'">Cancel</button>
+      <button class="btn-primary" onclick="saveWfTemplate()">Save Template</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentWfTemplates = [];
+let editStepsData = [];
+
+function openWorkflowBuilder() {
+  document.getElementById('wf-builder-overlay').style.display = 'flex';
+  loadWfTemplates();
+}
+
+function loadWfTemplates() {
+  const tbody = document.getElementById('wf-list-body');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">Loading...</td></tr>';
+  
+  google.script.run.withSuccessHandler(res => {
+    currentWfTemplates = res;
+    renderWfTable();
+  }).withFailureHandler(err => {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:red;">Failed to load templates: ${err.message}</td></tr>`;
+  }).getAllWorkflowTemplates();
+}
+
+function renderWfTable() {
+  const tbody = document.getElementById('wf-list-body');
+  tbody.innerHTML = '';
+  if (currentWfTemplates.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">No templates found.</td></tr>';
+    return;
+  }
+  
+  currentWfTemplates.forEach(t => {
+    const isGlobal = t.scope === 'Global';
+    const appliesToStr = Array.isArray(t.appliesTo) ? t.appliesTo.join(', ') : t.appliesTo;
+    
+    // In a real prod setup, you might check if user is on master before allowing edit of global.
+    // For sandbox, we'll allow edit of everything, but show a warning if global.
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #eee';
+    tr.innerHTML = `
+      <td style="padding:10px; font-weight:bold;">${t.name}</td>
+      <td style="padding:10px;">${appliesToStr}</td>
+      <td style="padding:10px;">
+        <span style="background:${isGlobal ? '#e8f0fe' : '#fce8e6'}; color:${isGlobal ? '#1a73e8' : '#d93025'}; padding:2px 8px; border-radius:12px; font-size:0.8rem;">
+          ${t.scope}
+        </span>
+      </td>
+      <td style="padding:10px;">${t.steps ? t.steps.length : 0} steps</td>
+      <td style="padding:10px;">
+        <button class="btn" style="padding: 4px 8px; font-size: 0.8rem;" onclick="openWfEditor('${t.id}')">Edit</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function openWfEditor(id) {
+  let template = { id: '', name: '', appliesTo: '', steps: [], scope: 'Local' };
+  
+  if (id) {
+    template = currentWfTemplates.find(t => t.id === id) || template;
+  } else {
+    // Generate new ID
+    template.id = 'WF-' + Math.floor(Math.random() * 10000);
+  }
+  
+  document.getElementById('wf-edit-id').value = template.id;
+  document.getElementById('wf-edit-name').value = template.name;
+  // Build Applies To Checkboxes
+  const container = document.getElementById('wf-edit-appliesto-container');
+  container.innerHTML = '';
+  const appliesToArr = Array.isArray(template.appliesTo) ? template.appliesTo : String(template.appliesTo).split(',').map(s=>s.trim());
+  
+  if (window.FACT && window.FACT.config && window.FACT.config.types) {
+      window.FACT.config.types.forEach(type => {
+          const lbl = document.createElement('label');
+          lbl.style.cssText = 'display:flex; align-items:center; gap:4px; font-size:0.9rem;';
+          const isChecked = appliesToArr.includes(type) || appliesToArr.includes('All') ? 'checked' : '';
+          lbl.innerHTML = `<input type="checkbox" value="${type}" ${isChecked}> ${type}`;
+          container.appendChild(lbl);
+      });
+  } else {
+      container.innerHTML = '<input type="text" id="wf-edit-appliesto-fallback" style="width:100%" placeholder="Comma separated types" value="' + appliesToArr.join(', ') + '">';
+  }
+  
+  editStepsData = template.steps ? JSON.parse(JSON.stringify(template.steps)) : [];
+  renderWfSteps();
+  
+  document.getElementById('wf-editor-overlay').style.display = 'flex';
+}
+
+function renderWfSteps() {
+  const container = document.getElementById('wf-edit-steps');
+  container.innerHTML = '';
+  
+  if (editStepsData.length === 0) {
+    container.innerHTML = '<div style="color:#777; font-style:italic;">No steps defined. Add a step below.</div>';
+    return;
+  }
+  
+  let datalistHTML = '<datalist id="approver-options">';
+  if (window.FACT) {
+      const roles = (window.FACT.config && window.FACT.config.approverRoles) ? window.FACT.config.approverRoles : ['SME'];
+      const people = window.FACT.people && window.FACT.people.list ? window.FACT.people.list : [];
+      roles.forEach(r => datalistHTML += `<option value="${r}">Role</option>`);
+      people.forEach(p => {
+          const val = p.email || p.name || p;
+          datalistHTML += `<option value="${val}">Person</option>`;
+      });
+  }
+  datalistHTML += '</datalist>';
+  container.innerHTML += datalistHTML;
+  
+  editStepsData.forEach((step, idx) => {
+    const stepDiv = document.createElement('div');
+    stepDiv.style.cssText = 'background:white; padding:10px; margin-bottom:10px; border-radius:4px; border:1px solid #ccc; display:flex; flex-direction:column; gap:8px; position:relative;';
+    
+    // Simplistic approver mapping for demo
+    const approverRole = (step.approvers && step.approvers[0]) ? step.approvers[0].role : '';
+    
+    stepDiv.innerHTML = `
+      <div style="font-weight:bold; color:#005ea2;">Step ${idx + 1}</div>
+      <button onclick="removeWfStep(${idx})" type="button" style="position:absolute; right:10px; top:10px; background:none; border:none; color:red; cursor:pointer;">&times;</button>
+      
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+        <div>
+          <label style="font-size:0.8rem; display:block;">Step Name</label>
+          <input type="text" value="${step.name || ''}" onchange="updateWfStep(${idx}, 'name', this.value)" style="width:100%; box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:0.8rem; display:block;">Step Type</label>
+          <select onchange="updateWfStep(${idx}, 'type', this.value)" style="width:100%; box-sizing:border-box;">
+            <option value="sequential" ${step.type === 'sequential' ? 'selected' : ''}>Sequential (One person)</option>
+            <option value="parallel" ${step.type === 'parallel' ? 'selected' : ''}>Parallel (Requires All)</option>
+          </select>
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:0.8rem; display:block;">Approver Role / Email</label>
+          <input type="text" list="approver-options" value="${approverRole}" placeholder="e.g. SME, Branch Chief, or select email" onchange="updateWfApprover(${idx}, this.value)" style="width:100%; box-sizing:border-box;">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:0.8rem; display:block;">Required Action</label>
+          <select onchange="updateWfRequired(${idx}, this.value)" style="width:100%; box-sizing:border-box;">
+            <option value="all" ${step.requiredToAdvance === 'all' ? 'selected' : ''}>Required to Approve</option>
+            <option value="none" ${step.requiredToAdvance === 'none' ? 'selected' : ''}>Awareness Only (No approval needed)</option>
+          </select>
+        </div>
+      </div>
+    `;
+    container.appendChild(stepDiv);
+  });
+}
+
+function updateWfStep(idx, field, value) {
+  editStepsData[idx][field] = value;
+}
+
+function updateWfRequired(idx, val) {
+  editStepsData[idx].requiredToAdvance = val;
+}
+
+function updateWfApprover(idx, roleValue) {
+  let resolveBy = 'org_lookup';
+  if (roleValue.toLowerCase() === 'sme') resolveBy = 'assigned';
+  else if (roleValue.includes('@')) resolveBy = 'fixed';
+  
+  editStepsData[idx].approvers = [{ role: roleValue, resolveBy: resolveBy, email: roleValue.includes('@') ? roleValue : null }];
+}
+
+function addWfStep() {
+  const newStep = {
+    stepNumber: editStepsData.length + 1,
+    name: "New Step",
+    type: "sequential",
+    approvers: [{ role: "Reviewer", resolveBy: "org_lookup" }],
+    requiredToAdvance: "all",
+    onApprove: { nextStep: editStepsData.length + 2 },
+    onReject: { action: "return_to_owner" },
+    onNA: { nextStep: editStepsData.length + 2 }
+  };
+  editStepsData.push(newStep);
+  renderWfSteps();
+}
+
+function removeWfStep(idx) {
+  editStepsData.splice(idx, 1);
+  // Re-number
+  editStepsData.forEach((s, i) => { 
+    s.stepNumber = i + 1; 
+    s.onApprove.nextStep = (i === editStepsData.length - 1) ? null : i + 2;
+    s.onNA.nextStep = (i === editStepsData.length - 1) ? null : i + 2;
+  });
+  renderWfSteps();
+}
+
+function saveWfTemplate() {
+  const id = document.getElementById('wf-edit-id').value;
+  const name = document.getElementById('wf-edit-name').value;
+  
+  let appliesTo = [];
+  const container = document.getElementById('wf-edit-appliesto-container');
+  if (container.querySelector('input[type="checkbox"]')) {
+      appliesTo = Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+  } else if (document.getElementById('wf-edit-appliesto-fallback')) {
+      appliesTo = document.getElementById('wf-edit-appliesto-fallback').value.split(',').map(s=>s.trim());
+  }
+  
+  // Find original to determine scope
+  let scope = 'Local';
+  const existing = currentWfTemplates.find(t => t.id === id);
+  if (existing) scope = existing.scope;
+  
+  const templateData = {
+    id: id,
+    name: name,
+    appliesTo: appliesTo,
+    steps: editStepsData
+  };
+  
+  const isGlobal = (scope === 'Global');
+  
+  google.script.run.withSuccessHandler(res => {
+    if (res.success) {
+      document.getElementById('wf-edit-status').style.display = 'block';
+      setTimeout(() => {
+        document.getElementById('wf-edit-status').style.display = 'none';
+        document.getElementById('wf-editor-overlay').style.display = 'none';
+        loadWfTemplates();
+      }, 1000);
+    } else {
+      alert("Error saving: " + res.error);
+    }
+  }).saveWorkflowTemplate(templateData, isGlobal);
+}
+</script>

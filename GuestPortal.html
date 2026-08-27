@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root { --accent: #005ea2; --border: #dadce0; --bg-header: #f8f9fa; }
+      body { font-family: 'Inter', sans-serif; background-color: #f4f6f8; margin: 0; padding: 30px; }
+      h1, h2 { color: var(--accent); }
+      h1 { border-bottom: 2px solid var(--accent); padding-bottom: 10px; margin-top: 0; }
+      .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 20px 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+      .action-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      .action-table th, .action-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+      .action-table th { background-color: var(--bg-header); font-weight: 600; }
+      .action-table tbody tr { cursor: pointer; transition: background-color 0.2s; }
+      .action-table tbody tr:hover { background-color: #f0f7ff; }
+      .action-table th.status-col { width: 140px; }
+      .status-badge { padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; color: #fff; text-align: center; white-space: nowrap; }
+      .detail-table td { padding-top: 15px; padding-bottom: 15px; }
+      #detail-links ul { margin: 0; padding-left: 20px; }
+      .status-done { background-color: #188038; }
+      .status-blocked { background-color: #d93025; }
+      .status-inprogress { background-color: #1a73e8; }
+      .status-default { background-color: #5f6368; }
+      #comment-section, #notes-section { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border); }
+      #comment-section textarea { width: 100%; min-height: 80px; padding: 10px; border-radius: 4px; border: 1px solid var(--border); box-sizing: border-box; }
+      #comment-section button { background: var(--accent); color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: 600; margin-top: 10px; }
+      #comment-section button:disabled { background: #ccc; }
+      #comment-response { margin-top: 10px; font-weight: bold; }
+      .note-card { border: 1px solid #eee; border-radius: 6px; margin-bottom: 10px; }
+      .note-header { background: #f8f9fa; padding: 8px 12px; font-size: 0.8rem; color: #5f6368; display: flex; justify-content: space-between; }
+      .note-content { padding: 12px; white-space: pre-wrap; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="main-view">
+            <h1>My Action Items</h1>
+            <p>This page shows the status of all actions you are associated with. Click a row for details or to add a comment.</p>
+            <div id="action-list"><p>Loading your actions...</p></div>
+        </div>
+
+        <div id="detail-view" style="display: none;">
+            <h1 id="detail-title"></h1>
+            <p><a href="#" onclick="showMainView(); return false;">&larr; Back to Full List</a></p>
+
+            <table class="action-table detail-table">
+                <tr><th style="width: 180px;">Status</th><td id="detail-status"></td></tr>
+                <tr><th>Owner</th><td id="detail-owner"></td></tr>
+                <tr><th>Assigned Team</th><td id="detail-assigned"></td></tr>
+                <tr><th>Internal Due Date</th><td id="detail-int-due"></td></tr>
+                <tr><th>Final Due Date</th><td id="detail-due-date"></td></tr>
+                <tr><th>Current Status Update</th><td id="detail-summary" style="white-space: pre-wrap;"></td></tr>
+                <tr><th>Drive Folder & Links</th><td id="detail-links"></td></tr>
+            </table>
+
+            <div id="notes-section">
+                <h2>Activity & Comment History</h2>
+                <div id="detail-notes-log"></div>
+            </div>
+            
+            <div id="comment-section">
+                <h2>Add an Update or Comment</h2>
+                <textarea id="comment-text" placeholder="Type your comment here..."></textarea>
+                <button id="submit-comment-btn" onclick="submitComment()">Submit Comment</button>
+                <div id="comment-response"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allActions = [];
+        let currentActionId = null;
+        const requestedTask = "<?= typeof requestedTask !== 'undefined' ? requestedTask : '' ?>";
+
+        window.addEventListener('load', loadActions);
+
+        function loadActions() {
+          showMainView();
+          google.script.run.withSuccessHandler((actions) => {
+              renderActionList(actions);
+              if (requestedTask) {
+                  // Attempt to open the specific task
+                  const exists = actions.find(a => a.id === requestedTask);
+                  if (exists) {
+                      showDetailView(requestedTask);
+                  }
+              }
+          }).withFailureHandler(showError).getGuestActionData();
+        }
+
+        function renderActionList(actions) {
+    allActions = actions;
+    const listDiv = document.getElementById('action-list');
+    if (!actions || actions.length === 0) {
+        listDiv.innerHTML = '<p style="text-align:center; padding: 50px; color: #5f6368;">You have no active action items in the system.</p>';
+        return;
+    }
+
+    // Sort the actions by internal due date here on the client-side
+    actions.sort((a, b) => {
+        const dateA = a.intDue !== 'N/A' ? new Date(a.intDue).getTime() : Infinity;
+        const dateB = b.intDue !== 'N/A' ? new Date(b.intDue).getTime() : Infinity;
+        return dateA - dateB;
+    });
+
+    let tableHtml = '<table class="action-table"><thead><tr>' +
+                    '<th>Title</th><th class="status-col">Status</th><th>Owner</th><th>Assigned Team</th>' +
+                    '<th>Internal Due</th><th>Current Status Update</th><th>All Guest Notes</th>' + // Updated Header
+                    '</tr></thead><tbody>';
+
+    actions.forEach(function(action) {
+        let statusClass = getStatusClass(action.status);
+
+        // --- START: NEW LOGIC TO BUILD A SCROLLABLE LIST OF ALL NOTES ---
+        let allGuestNotesHtml = '<div style="font-size: 0.8rem; color: #5f6368;">None</div>';
+        if (action.notes && action.notes.length > 0) {
+            allGuestNotesHtml = '<div style="max-height: 120px; overflow-y: auto; font-size: 0.85rem; padding-right: 5px;">';
+            action.notes.forEach(note => {
+                const cleanText = note.text.replace(/\[GUEST COMMENT by .*?\]:\n?/, '');
+                allGuestNotesHtml += `
+                    <div style="border-bottom: 1px dashed #eee; padding-bottom: 5px; margin-bottom: 5px;">
+                        <strong>${note.author.split('@')[0]}</strong> <span style="color:#888;">(${note.timestamp}):</span>
+                        <div style="padding-left: 5px;">${cleanText}</div>
+                    </div>
+                `;
+            });
+            allGuestNotesHtml += '</div>';
+        }
+        // --- END: NEW LOGIC ---
+
+        tableHtml += `<tr onclick="showDetailView('${action.id}')">
+                        <td><strong>${action.title}</strong><br><small style="color:#5f6368;">ID: ${action.id}</small></td>
+                        <td><span class="status-badge ${statusClass}">${action.status}</span></td>
+                        <td>${action.owner}</td>
+                        <td>${action.assigned || 'N/A'}</td>
+                        <td>${action.intDue}</td>
+                        <td>${action.statusSummary}</td>
+                        <td>${allGuestNotesHtml}</td>
+                      </tr>`;
+    });
+    tableHtml += '</tbody></table>';
+    listDiv.innerHTML = tableHtml;
+}
+
+        function showDetailView(actionId) {
+    currentActionId = actionId;
+    const action = allActions.find(a => a.id === actionId);
+    if (!action) return;
+
+    // Switch views
+    document.getElementById('main-view').style.display = 'none';
+    document.getElementById('detail-view').style.display = 'block';
+
+    // Populate main details
+    document.getElementById('detail-title').textContent = action.title;
+    document.getElementById('detail-status').innerHTML = `<span class="status-badge ${getStatusClass(action.status)}">${action.status}</span>`;
+    document.getElementById('detail-owner').textContent = action.owner;
+    document.getElementById('detail-assigned').textContent = action.assigned || 'N/A';
+    document.getElementById('detail-int-due').textContent = action.intDue;
+    document.getElementById('detail-due-date').textContent = action.dueDate;
+    document.getElementById('detail-summary').textContent = action.statusSummary;
+
+    // Populate attachments and links
+    let linksHtml = 'None';
+    if (action.driveLink) {
+        const links = action.driveLink.split('\n').filter(Boolean);
+        const folderLink = links.find(link => link.includes('/drive/folders/'));
+        const otherLinks = links.filter(link => !link.includes('/drive/folders/'));
+        linksHtml = '';
+        if(folderLink) {
+            linksHtml += `<p style="margin:0 0 10px 0;"><a href="${folderLink}" target="_blank" style="font-weight:bold;">Open Main Drive Folder</a></p>`;
+        }
+        if (otherLinks.length > 0) {
+            linksHtml += '<ul>';
+            otherLinks.forEach(link => {
+                const urlMatch = link.match(/https?:\/\/\S+/);
+                const textPart = urlMatch ? link.replace(urlMatch[0], '').trim() : 'Link';
+                linksHtml += `<li><a href="${urlMatch ? urlMatch[0] : '#'}" target="_blank">${textPart}</a></li>`;
+            });
+            linksHtml += '</ul>';
+        }
+        if (!linksHtml.trim()) linksHtml = 'None';
+    }
+    document.getElementById('detail-links').innerHTML = linksHtml;
+
+    // --- THIS IS THE FIX: Populate the comment history ---
+    const notesLogDiv = document.getElementById('detail-notes-log');
+    if (action.notes && action.notes.length > 0) {
+      notesLogDiv.innerHTML = action.notes.map(note => {
+        // Clean up the "[GUEST COMMENT by...]" prefix for a nicer display
+        const cleanText = note.text.replace(/\[GUEST COMMENT by .*?\]:\n?/, '');
+        return `
+          <div class="note-card">
+            <div class="note-header">
+              <span>by <strong>${note.author.split('@')[0]}</strong></span>
+              <span>${note.timestamp}</span>
+            </div>
+            <div class="note-content">${cleanText}</div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      notesLogDiv.innerHTML = '<p style="color:#888; font-style: italic;">No guest comments have been added yet.</p>';
+    }
+    // --- END OF FIX ---
+
+    // Reset the new comment form
+    document.getElementById('comment-text').value = '';
+    document.getElementById('comment-response').textContent = '';
+    window.scrollTo(0, 0); // Scroll to the top of the page
+}
+
+        function showMainView() {
+            document.getElementById('main-view').style.display = 'block';
+            document.getElementById('detail-view').style.display = 'none';
+            currentActionId = null;
+            if (allActions && allActions.length > 0) {
+                renderActionList(allActions);
+            }
+        }
+
+        function submitComment() {
+            const commentText = document.getElementById('comment-text').value;
+            if (!commentText.trim() || !currentActionId) return;
+            const btn = document.getElementById('submit-comment-btn');
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+            google.script.run
+                .withSuccessHandler(function(response) {
+                    btn.disabled = false;
+                    btn.textContent = 'Submit Comment';
+                    document.getElementById('comment-text').value = '';
+                    const respEl = document.getElementById('comment-response');
+                    respEl.textContent = response.message;
+                    respEl.style.color = '#188038';
+                    const action = allActions.find(a => a.id === currentActionId);
+                    google.script.run.withSuccessHandler(notes => {
+                        action.notes = notes;
+                        showDetailView(currentActionId);
+                    }).getGuestNotesForItem(currentActionId);
+                })
+                .withFailureHandler(function(error) {
+                    btn.disabled = false;
+                    btn.textContent = 'Submit Comment';
+                    const respEl = document.getElementById('comment-response');
+                    respEl.textContent = error.message;
+                    respEl.style.color = '#d93025';
+                })
+                .addGuestComment(currentActionId, commentText);
+        }
+
+        function getStatusClass(status) {
+            if (!status) return 'status-default';
+            if (status.includes('Done') || status.includes('Cancelled')) return 'status-done';
+            if (status === 'Blocked') return 'status-blocked';
+            if (status === 'In Progress') return 'status-inprogress';
+            return 'status-default';
+        }
+
+        function showError(error) {
+            document.getElementById('action-list').innerHTML = `<p style="color:red; text-align:center; padding: 50px;">Error loading actions: ${error.message}</p>`;
+        }
+    </script>
+</body>
+</html>

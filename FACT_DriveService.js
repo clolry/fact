@@ -1,0 +1,592 @@
+// ==========================================
+// FACT DRIVE SERVICE
+// ==========================================
+
+/**
+ * Creates or updates a Task, Project, or Sub-Task.
+ * Orchestrates drive automation, notifications, and logging.
+ * @param {object} form The form data object from the frontend.
+ * @param {string[]} changeLog Array of change description strings.
+ * @returns {{success: boolean, id: string}}
+ */
+function saveItem(form, changeLog) {
+  // ARCH-03: Note - This function currently performs multiple independent operations 
+  // without transaction rollback. If a later step fails (e.g. folder creation), 
+  // earlier steps (e.g. row update) are not reverted. Full transactional refactor is future work.
+  const isNew = (!form.ID || String(form.ID).trim() === '' || form.ID === 'New Item');
+
+  // 1. Find existing row (if editing)
+  const { sheetName, row, oldOwner, oldDriveLink, folderId: existingFolderId } =
+    findExistingRow_(form, isNew);
+
+  // 2. Generate ID
+  const finalId = isNew ? generateItemId_(form.Type) : String(form.ID).trim();
+
+  // 3. Drive folder provisioning (new items only)
+  const { driveLink, folderId } = provisionDriveFolder_(
+    form, finalId, isNew, existingFolderId
+  );
+
+  // 4. Intake artifact processing (new items promoted from intake)
+  const { driveLink: driveLink2, folderId: folderId2 } = processIntakeArtifacts_(
+    form, finalId, isNew, driveLink, folderId
+  );
+
+  // 5. Shortcut creation (existing items with new links added)
+  if (!isNew && folderId2) {
+    createLinkShortcuts_(folderId2, oldDriveLink, driveLink2);
+  }
+
+  // 5.5 Grant Folder Access to Owner and Assigned Team
+  if (folderId2) {
+    grantFolderAccessFast_(folderId2, [form.Owner || '', ...(form.Assigned || '').split(',')]);
+  }
+
+  // 5.8 Primary Doc handling
+  if (folderId2 && form.Primary_Doc_ID) {
+    handlePrimaryDoc_(folderId2, form.Primary_Doc_ID);
+  }
+
+  // 6. Write to sheet
+  writeItemToSheet_(form, finalId, sheetName, row, isNew, driveLink2, folderId2);
+
+  // 7. Assignment notification
+  if (!isNew && oldOwner.trim() !== (form.Owner || '').trim() && form.Owner) {
+    sendAssignmentNotification_(finalId, form.Title, form.Owner);
+  }
+
+  // 8. Finalize: notes, logging, intake cleanup
+  finalizeItem_(form, finalId, isNew, sheetName, changeLog);
+
+  // 9. Stakeholder auto-registration
+  try {
+    ensureStakeholdersRegistered_([
+      form.Owner || '',
+      form.Assigned || '',
+      form.Requestor || ''
+    ]);
+  } catch (e) {
+    console.error(`Stakeholder registration failed during saveItem: ${e.message}`);
+  }
+
+  // 10. Federation Sync (Opt-in)
+  if (form.promoteToMaster) {
+    try {
+      syncToMaster_(finalId, form, SpreadsheetApp.getActiveSpreadsheet().getId());
+    } catch (e) {
+      console.error(`Federation sync failed: ${e.message}`);
+    }
+  }
+
+  return { success: true, id: finalId };
+}
+/**
+ * Searches for an existing item across Tasks and Projects sheets.
+ * @param {object} form The form data.
+ * @param {boolean} isNew Whether this is a new item.
+ * @returns {{sheetName: string, row: number, oldOwner: string, oldDriveLink: string, folderId: string}}
+ * @private
+ */
+function findExistingRow_(form, isNew) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const id = String(form.ID || '').trim();
+  let sheetName = '';
+  let row = -1;
+  let oldOwner = '';
+  let oldDriveLink = '';
+  let folderId = form.FolderID || '';
+
+  if (!isNew) {
+    const searchOrder = ['Tasks', 'Projects', 'Sub_Tasks'];
+    for (const name of searchOrder) {
+      const sh = ss.getSheetByName(name);
+      if (!sh || sh.getLastRow() < 2) continue;
+
+      // PERF-04: Fixed: Only fetching ID column to reduce payload and memory usage
+      const allIds = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+      const rowIndex = allIds.findIndex(row => String(row[0]).trim() === id);
+      if (rowIndex !== -1) {
+          sheetName = name;
+          row = rowIndex + 2;
+          const oldData = sh.getRange(row, 1, 1, 14).getValues()[0];
+          const ownerColIndex = (name === 'Projects') ? 3 : 4;
+          oldOwner = oldData[ownerColIndex] || '';
+          oldDriveLink = oldData[12] || '';
+          folderId = oldData[13] || '';
+          break;
+      }
+      if (sheetName) break;
+    }
+  }
+
+  // Determine target sheet for new items
+  if (!sheetName) {
+    if (form.Type === 'Project') sheetName = 'Projects';
+    else if (form.Type === 'Sub-Task') sheetName = 'Sub_Tasks';
+    else sheetName = 'Tasks';
+  }
+
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Target sheet '${sheetName}' not found.`);
+
+  return { sheetName, row, oldOwner, oldDriveLink, folderId };
+}
+/**
+ * Generates a new unique item ID using a global counter in Script Properties.
+ * @param {string} type The item type (e.g. 'Project', 'Task', 'Data Call').
+ * @returns {string} The new ID (e.g. 'TASK-1042').
+ * @private
+ */
+function generateItemId_(type) {
+  const config = loadConfig_();
+  let prefix = '';
+
+  // 1. Try to fetch the configured prefix for this specific type
+  if (type && config.driveConfig && config.driveConfig[type] && config.driveConfig[type].prefix) {
+    prefix = config.driveConfig[type].prefix;
+  }
+  
+  // 2. Fallback if no prefix is explicitly defined
+  if (!prefix) {
+    prefix = (type || 'TASK').substring(0, 4).toUpperCase().replace(/ /g, '');
+    if (!['PROJ', 'TASK', 'SUB-'].includes(prefix)) prefix = 'TASK';
+  }
+
+  const prop = PropertiesService.getScriptProperties();
+  let count = parseInt(prop.getProperty('GLOBAL_ID') || '1000') + 1;
+  prop.setProperty('GLOBAL_ID', count.toString());
+
+  return `${prefix}-${count}`;
+}
+/**
+ * Creates a Drive folder for a new item and copies any template files.
+ * @param {object} form The form data.
+ * @param {string} finalId The item's ID.
+ * @param {boolean} isNew Whether this is a new item.
+ * @param {string} existingFolderId Folder ID if already known.
+ * @returns {{driveLink: string, folderId: string}}
+ * @private
+ */
+function provisionDriveFolder_(form, finalId, isNew, existingFolderId) {
+  let driveLink = form.DriveLink || '';
+  let folderId = existingFolderId || '';
+
+  if (!isNew || form.Type === 'Sub-Task') {
+    return { driveLink, folderId };
+  }
+
+  try {
+    const driveConfigMap = getDriveConfigMap_();
+    const config = driveConfigMap.get((form.Type || '').trim().toLowerCase());
+    if (!config || !config.baseFolderId) {
+        const keys = Array.from(driveConfigMap.keys()).join(', ');
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const sh = ss.getSheetByName('Drive_Config');
+        const rows = sh ? sh.getLastRow() : 'NoSheet';
+        driveLink = `ERROR PROVISIONING FOLDER: No config found for type ${(form.Type || '').trim().toLowerCase()}. Available keys: [${keys}]. SheetRows: ${rows}. configObj: ${JSON.stringify(config)}\n${driveLink}`.trim();
+        return { driveLink, folderId };
+    }
+    
+    // Auto-extract ID if user pasted a full URL
+    let cleanBaseId = config.baseFolderId;
+    const baseMatch = cleanBaseId.match(/[-\w]{25,}/);
+    if (baseMatch) cleanBaseId = baseMatch[0];
+
+    const parentFolder = DriveApp.getFolderById(cleanBaseId);
+    const fiscalYear = getCurrentFiscalYear_();
+    const fyFolder = getOrCreateSubfolder_(parentFolder, fiscalYear);
+    const newRecordFolder = fyFolder.createFolder(`${finalId}: ${form.Title}`);
+
+    driveLink = `${newRecordFolder.getUrl()}\n${driveLink}`.trim();
+    folderId = newRecordFolder.getId();
+    
+    // Transfer ownership of the newly created folder to the assigned Owner
+    let newOwnerEmail = null;
+    const extractEmail = (str) => {
+        const match = (str || '').match(/<([^>]+)>/);
+        return match ? match[1].toLowerCase().trim() : (str || '').toLowerCase().trim();
+    };
+    if (form.Owner) {
+        newOwnerEmail = extractEmail(form.Owner.split(',')[0]);
+    } else if (form.Requestor) {
+        newOwnerEmail = extractEmail(form.Requestor.split(',')[0]);
+    }
+    
+    if (newOwnerEmail && newOwnerEmail.endsWith('@gsa.gov')) {
+        try {
+            newRecordFolder.setOwner(newOwnerEmail);
+        } catch(e) {
+            console.error("Could not transfer folder ownership to " + newOwnerEmail + ": " + e.message);
+        }
+    }
+
+    if (config.templateFolderId) {
+      let cleanTemplateId = config.templateFolderId;
+      const tMatch = cleanTemplateId.match(/[-\w]{25,}/);
+      if (tMatch) cleanTemplateId = tMatch[0];
+      
+      // Async offload to prevent UI blocking
+      const ts = new Date().getTime();
+      const propKey = 'copyJob_' + ts;
+      PropertiesService.getScriptProperties().setProperty(propKey, JSON.stringify({
+         sourceId: cleanTemplateId,
+         targetId: newRecordFolder.getId(),
+         ownerEmail: newOwnerEmail
+      }));
+      ScriptApp.newTrigger('processAsyncTemplateCopy_').timeBased().after(1).create();
+    }
+  } catch (e) {
+    console.error(`Drive folder provisioning error for ${finalId}: ${e.message}`);
+    driveLink = `ERROR PROVISIONING FOLDER: ${e.message}\n${driveLink}`.trim();
+  }
+
+  return { driveLink, folderId };
+}
+
+/**
+ * Processes email attachments and links for items promoted from the intake queue.
+ * @param {object} form The form data.
+ * @param {string} finalId The item's ID.
+ * @param {boolean} isNew Whether this is a new item.
+ * @param {string} driveLink Current drive link string.
+ * @param {string} folderId Current folder ID.
+ * @returns {{driveLink: string, folderId: string}}
+ * @private
+ */
+function processIntakeArtifacts_(form, finalId, isNew, driveLink, folderId) {
+  if (!form.IntakeRowIndex || !isNew || !form.ThreadID) {
+    return { driveLink, folderId };
+  }
+
+  try {
+    let targetFolderId = folderId;
+
+    if (!targetFolderId) {
+      const config = loadConfig_();
+      if (config.destinationFolderId) {
+        const fallbackFolder = DriveApp.getFolderById(config.destinationFolderId);
+        const tempFolder = fallbackFolder.createFolder(`[INTAKE] ${finalId} - ${form.Title}`);
+        targetFolderId = tempFolder.getId();
+        driveLink = `${tempFolder.getUrl()}\n${driveLink}`.trim();
+        folderId = targetFolderId;
+      }
+    }
+
+    if (targetFolderId) {
+      const thread = GmailApp.getThreadById(form.ThreadID);
+      if (thread) {
+        const firstMessage = thread.getMessages()[0];
+        const newLinks = processAndSaveArtifacts_(targetFolderId, firstMessage);
+        if (newLinks.length > 0) {
+          driveLink = `${driveLink}\n${newLinks.join('\n')}`.trim();
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`Intake artifact processing error for ${finalId}: ${e.message}`);
+  }
+
+  return { driveLink, folderId };
+}
+
+/**
+ * Creates Drive shortcuts for any newly added links on an existing item.
+ * @param {string} folderId The item's Drive folder ID.
+ * @param {string} oldDriveLink The previous drive link string.
+ * @param {string} newDriveLink The updated drive link string.
+ * @private
+ */
+function createLinkShortcuts_(folderId, oldDriveLink, newDriveLink) {
+  if (!folderId || newDriveLink === oldDriveLink) return;
+
+  try {
+    const recordFolder = DriveApp.getFolderById(folderId);
+    const oldLinks = new Set((oldDriveLink || '').split('\n').filter(l => l.trim()));
+    const addedLinks = (newDriveLink || '')
+      .split('\n')
+      .filter(l => l.trim() && !oldLinks.has(l.trim()));
+
+    addedLinks.forEach(link => {
+      const urlMatch = link.match(/https?:\/\/\S+/);
+      if (!urlMatch) return;
+      const url = urlMatch[0];
+      let title = link.replace(url, '').trim();
+      if (!title) {
+        const titleMatch = url.match(/^(?:https?:\/\/)?(?:www\.)?([^/]+)/);
+        title = (titleMatch && titleMatch[1]) ? titleMatch[1] : 'External Link';
+      }
+
+      try {
+        const driveFileIdMatch = url.match(/\/d\/([\w-]+)/);
+        const driveFolderIdMatch = url.match(/\/drive\/folders\/([\w-]+)/);
+
+        if (driveFileIdMatch?.[1]) {
+          DriveApp.getFileById(driveFileIdMatch[1]);
+          recordFolder.createShortcut(driveFileIdMatch[1]);
+        } else if (driveFolderIdMatch?.[1]) {
+          DriveApp.getFolderById(driveFolderIdMatch[1]);
+          recordFolder.createShortcut(driveFolderIdMatch[1]);
+        } else {
+          const doc = DocumentApp.create(`[WEB LINK] ${title}`);
+          doc.getBody().appendParagraph(url).setLinkUrl(url);
+          doc.saveAndClose();
+          DriveApp.getFileById(doc.getId()).moveTo(recordFolder);
+        }
+      } catch (linkError) {
+        console.error(`Could not process link "${link}": ${linkError.message}`);
+      }
+    });
+  } catch (e) {
+    console.error(`createLinkShortcuts_ error: ${e.message}`);
+  }
+}
+
+/**
+ * Moves the primary document into the item's folder, or creates a shortcut if it lacks move permissions.
+ * @param {string} folderId The item's Drive folder ID.
+ * @param {string} newDocUrl The Primary_Doc URL.
+ * @private
+ */
+function handlePrimaryDoc_(folderId, newDocUrl) {
+    if (!folderId || !newDocUrl) return;
+    try {
+        const driveFileIdMatch = newDocUrl.match(/\/d\/([\w-]+)/);
+        if (!driveFileIdMatch || !driveFileIdMatch[1]) return;
+        const fileId = driveFileIdMatch[1];
+        
+        const recordFolder = DriveApp.getFolderById(folderId);
+        
+        // Check if file or shortcut is already in this folder
+        const files = recordFolder.getFiles();
+        let alreadyInFolder = false;
+        while(files.hasNext()) {
+            const f = files.next();
+            if (f.getId() === fileId || (f.getMimeType() === MimeType.SHORTCUT && f.getTargetId() === fileId)) {
+                alreadyInFolder = true;
+                break;
+            }
+        }
+        if (alreadyInFolder) return;
+
+        const file = DriveApp.getFileById(fileId);
+        try {
+            file.moveTo(recordFolder);
+        } catch(e) {
+            // Fallback to shortcut if we lack move permissions or it's a shared drive boundary
+            recordFolder.createShortcut(fileId);
+        }
+    } catch(e) {
+        console.warn("Could not process primary doc handling: " + e.message);
+    }
+}
+
+
+/**
+ * Requests a native Google Docs approval on a document.
+ * @param {string} itemId The item ID (e.g. TASK-1234)
+ * @param {string} fileId The Google Drive file ID
+ * @param {string[]} approverEmails Array of approver email addresses
+ * @param {string} instructions Message to include
+ * @param {string} dueDate ISO date string
+ */
+
+/**
+ * Unlocks a document that was locked by a previous native approval.
+ * @param {string} fileId
+ */
+function unlockDocument_(fileId) {
+  try {
+    if (!fileId) return;
+    const file = DriveApp.getFileById(fileId);
+    if (file.isLocked()) {
+      file.setLocked(false);
+      console.log("Successfully unlocked document via DriveApp: " + fileId);
+    }
+  } catch(e) {
+    console.warn("Could not unlock document via DriveApp: " + e.message);
+    
+    // Fallback: try patching metadata via REST API
+    try {
+      const url = `https://www.googleapis.com/drive/v3/files/${fileId}`;
+      const payload = { "contentHints": { "readOnly": false } };
+      UrlFetchApp.fetch(url, {
+        method: 'patch',
+        headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() },
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true
+      });
+    } catch(err) {
+      console.warn("REST API unlock fallback also failed: " + err.message);
+    }
+  }
+}
+
+function requestDocApproval(itemId, fileId, approverEmails, instructions, dueDate) {
+  try {
+    const approvalConfig = {
+      approvers: approverEmails.map(email => ({ emailAddress: email })),
+      message: instructions || 'Please review and approve this document.',
+      dueDate: dueDate || null
+    };
+
+    // Call the Drive Approvals API
+    const response = Drive.Approvals.create(approvalConfig, fileId);
+
+    // Store the approval request ID in Approval_Tracking sheet
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let trackingSheet = ss.getSheetByName('Approval_Tracking');
+    if (!trackingSheet) {
+      trackingSheet = ss.insertSheet('Approval_Tracking');
+      trackingSheet.appendRow(['Item_ID', 'File_ID', 'Approval_ID', 'Approvers', 'Requested_Date', 'Status', 'Completed_Date', 'Result']);
+    }
+    
+    trackingSheet.appendRow([
+      itemId, fileId, response.id, approverEmails.join(', '), new Date(), 'Pending', '', ''
+    ]);
+
+    return { success: true, approvalId: response.id };
+  } catch (e) {
+    console.error(`requestDocApproval failed for ${itemId}: ${e.message}`);
+    throw e;
+  }
+}
+
+/**
+ * Updates a native Google Docs approval decision.
+ */
+function updateNativeApproval_(fileLink, decision) {
+  try {
+    const fileIdMatch = fileLink.match(/[-\w]{25,}/);
+    if (!fileIdMatch) return;
+    const fileId = fileIdMatch[0];
+    // Native update via Drive.Approvals requires specific approval IDs. 
+    // This serves as a placeholder to be fully integrated with Approval_Tracking.
+    console.log(`Native approval update triggered for file ${fileId} with decision: ${decision}`);
+  } catch(e) {
+    console.error(`updateNativeApproval_ failed: ${e.message}`);
+  }
+}
+
+
+/**
+ * Background trigger to copy template files asynchronously.
+ */
+function processAsyncTemplateCopy_(e) {
+  // Clean up trigger
+  if (e && e.triggerUid) {
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(t => {
+      if (t.getUniqueId() === e.triggerUid) ScriptApp.deleteTrigger(t);
+    });
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const allKeys = props.getKeys();
+  
+  for (let key of allKeys) {
+    if (key.startsWith('copyJob_')) {
+      const jobRaw = props.getProperty(key);
+      if (!jobRaw) continue;
+      
+      try {
+        const job = JSON.parse(jobRaw);
+        const templateFolder = DriveApp.getFolderById(job.sourceId);
+        const targetFolder = DriveApp.getFolderById(job.targetId);
+        
+        const files = templateFolder.getFiles();
+        while (files.hasNext()) {
+          const file = files.next();
+          const copiedFile = file.makeCopy(file.getName(), targetFolder);
+          
+          // Transfer ownership of copied templates to silence deployer notifications
+          if (job.ownerEmail && job.ownerEmail.endsWith('@gsa.gov')) {
+              try {
+                  copiedFile.setOwner(job.ownerEmail);
+              } catch(e) {
+                  console.error("Could not transfer file ownership to " + job.ownerEmail + ": " + e.message);
+              }
+          }
+        }
+      } catch (err) {
+        console.error("Error in processAsyncTemplateCopy_: " + err.message);
+      } finally {
+        // Always delete the job so we don't infinitely retry a broken one
+        props.deleteProperty(key);
+      }
+    }
+  }
+}
+
+/**
+ * Grants editor access to a Drive folder for a list of names/emails using parallel batch processing.
+ */
+function grantFolderAccessFast_(folderId, identifiers) {
+    if(!identifiers || identifiers.length === 0 || !folderId) return;
+    
+    // 1. Get Stakeholders Map
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let stkSh = ss.getSheetByName('Stakeholders');
+    const emailMap = new Map();
+    if (stkSh && stkSh.getLastRow() > 1) {
+        const stkData = stkSh.getRange(2, 1, stkSh.getLastRow() - 1, 2).getValues();
+        stkData.forEach(r => {
+            if (r[0] && r[1]) emailMap.set(r[0].toString().trim().toLowerCase(), r[1].toString().trim().toLowerCase());
+        });
+    }
+
+    // 2. Resolve identifiers to emails
+    let emails = [];
+    identifiers.forEach(id => {
+        let cleanId = id.trim().toLowerCase();
+        if (!cleanId) return;
+        if (cleanId.includes('@')) {
+            emails.push(cleanId);
+        } else if (emailMap.has(cleanId)) {
+            emails.push(emailMap.get(cleanId));
+        }
+    });
+
+    const validEmails = [...new Set(emails.filter(e => e.includes('@')))];
+    if(validEmails.length === 0) return;
+    
+    const token = ScriptApp.getOAuthToken();
+    const requests = validEmails.map(email => ({
+        url: `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false`,
+        method: 'post',
+        contentType: 'application/json',
+        headers: { Authorization: "Bearer " + token },
+        payload: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email }),
+        muteHttpExceptions: true
+    }));
+    
+    try {
+        UrlFetchApp.fetchAll(requests);
+    } catch(e) {
+        console.error("Failed to batch grant folder access: " + e.message);
+    }
+}
+
+/**
+ * Reads the Drive_Config sheet and returns a Map mapping item types to their base/template folder configs.
+ * @returns {Map<string, {baseFolderId: string, templateFolderId: string}>}
+ * @private
+ */
+function getDriveConfigMap_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const map = new Map();
+  const sh = ss.getSheetByName('Drive_Config');
+  if (!sh || sh.getLastRow() < 2) return map;
+  
+  const data = sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues();
+  data.forEach(r => {
+    if (r[0]) {
+      map.set(r[0].toString().trim().toLowerCase(), {
+        baseFolderId: r[1] ? r[1].toString().trim() : '',
+        templateFolderId: r[2] ? r[2].toString().trim() : ''
+      });
+    }
+  });
+  return map;
+}
+

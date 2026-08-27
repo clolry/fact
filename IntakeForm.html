@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      :root { --accent: #005ea2; --border: #dadce0; --bg-light: #f8f9fa; --success: #188038; --danger: #d93025; }
+      body { font-family: 'Inter', sans-serif; background-color: #f4f6f8; margin: 0; padding: 30px; }
+      .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+      h1 { color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 10px; margin-top: 0; }
+      .form-group { margin-bottom: 20px; }
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      label { display: block; font-weight: 600; margin-bottom: 5px; color: #333; }
+      input[type="text"], input[type="date"], textarea, select {
+        width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; font-size: 1rem;
+      }
+      input[readonly] { background-color: var(--bg-light); cursor: not-allowed; }
+      textarea { min-height: 120px; resize: vertical; }
+      button { background: var(--accent); color: #fff; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 1rem; margin-top: 10px;}
+      button:disabled { background: #ccc; }
+      #response-message { margin-top: 20px; padding: 15px; border-radius: 4px; font-weight: bold; text-align: center; }
+      .success { background-color: #e6f4ea; color: var(--success); }
+      .error { background-color: #fce8e6; color: var(--danger); }
+      .link-preview { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+      .link-tag { 
+        display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; 
+        background: #e8f0fe; color: #1a73e8; border-radius: 16px; 
+        text-decoration: none; font-size: 0.85rem; font-weight: 500; border: 1px solid #d2e3fc; 
+        transition: background 0.2s; width: fit-content;
+      }
+      .link-tag:hover { background: #d2e3fc; text-decoration: none; }
+      .link-tag span { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1><span id="ui-workgroup-name">Workgroup</span> Action Item Intake</h1>
+      <p>Use this form to submit a new action or inquiry for our team.</p>
+      
+      <div id="intake-form">
+        <div class="form-group">
+          <label for="requestor">Requestor</label>
+          <input type="text" id="requestor" name="requestor" readonly value="Loading your name...">
+        </div>
+
+        <div class="form-group">
+            <label for="type">Action Type / Workflow Trigger</label>
+            <select id="type" name="type">
+              <option value="Task">General Task</option>
+              <option value="Data Call">Data Call (Automated Workflow)</option>
+              <option value="Congressional Inquiry">Congressional Inquiry (Automated Workflow)</option>
+              <option value="White House Inquiry">White House Inquiry (Automated Workflow)</option>
+              <option value="OIG Hotline">OIG Hotline (Automated Workflow)</option>
+              <option value="AC Review">AC Review</option>
+              <option value="DAC-A Review">DAC-A Review</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+          <label for="title">Action Title</label>
+          <input type="text" id="title" name="title" required>
+        </div>
+
+        <div class="form-group" style="display:none;">
+          <input type="checkbox" id="promoteToMaster" name="promoteToMaster" value="false">
+        </div>
+
+        <div class="form-group">
+          <label for="dueDate">Date Approval Needed By</label>
+          <input type="date" id="dueDate" name="dueDate">
+        </div>
+
+        <div class="form-group">
+          <label for="approverRole">Required Approver Role</label>
+          <select id="approverRole" name="approverRole">
+            <option value="">-- Select Approver Role --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="primary_doc">Final Deliverable for Approval Link</label>
+          <textarea id="primary_doc" name="primary_doc" oninput="renderPrimaryDocPreview()" placeholder="Paste link to final deliverable here (e.g. My Doc https://docs...)" rows="2" style="font-family:monospace; font-size:0.85rem;"></textarea>
+          <div id="primary-doc-preview" class="link-preview"></div>
+        </div>
+
+        <div class="form-group">
+          <label for="links">Supporting Document Links</label>
+          <textarea id="links" name="links" placeholder="Paste links to Google Docs, Slides, etc. one per line."></textarea>
+        </div>
+        
+        <button id="submit-btn" onclick="submitForm()">Submit Action</button>
+      </div>
+
+      <div id="response-message" style="display: none;"></div>
+    </div>
+
+    <script>
+      let workgroupName = "Workgroup";
+      
+      function initApp() {
+        google.script.run.withSuccessHandler(res => {
+           document.getElementById('requestor').value = res.user.email;
+           if (res.config) {
+             if (res.config.workgroupName) {
+               workgroupName = res.config.workgroupName;
+               document.getElementById('ui-workgroup-name').textContent = workgroupName;
+             }
+             if (res.config.approverRoles && res.config.approverRoles.length > 0) {
+               const select = document.getElementById('approverRole');
+               select.innerHTML = '<option value="">-- Select Approver Role --</option>';
+               res.config.approverRoles.forEach(role => {
+                 select.innerHTML += `<option value="${role}">${role}</option>`;
+               });
+             }
+           }
+        }).getBootstrap();
+      }
+      
+      window.addEventListener('load', initApp);
+
+      function submitForm() {
+        const btn = document.getElementById('submit-btn');
+
+        const formData = {
+          requestor: document.getElementById('requestor').value,
+          title: document.getElementById('title').value,
+          type: document.getElementById('type').value,
+          dueDate: document.getElementById('dueDate').value,
+          links: document.getElementById('links').value,
+          promoteToMaster: document.getElementById('promoteToMaster').checked,
+          approverRole: document.getElementById('approverRole').value,
+          primaryDoc: document.getElementById('primary_doc').value
+        };
+
+        if (!formData.title) {
+          alert('Please provide a Title for the action.');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Submitting...';
+        
+        google.script.run
+          .withSuccessHandler(showResponse)
+          .withFailureHandler(showError)
+          .submitNewAction(formData);
+      }
+
+      function renderPrimaryDocPreview() {
+        const text = document.getElementById('primary_doc').value || '';
+        const container = document.getElementById('primary-doc-preview');
+        if (!container) return;
+        container.innerHTML = '';
+        const lines = text.split('\n');
+        lines.forEach(line => {
+          line = line.trim();
+          if(!line) return;
+          const match = line.match(/^(.*?)(https?:\/\/\S+)$/);
+          let name = ""; let link = "";
+          if (match) { name = match[1].trim(); link = match[2].trim(); } else if (line.startsWith('http')) { link = line; }
+          if (link) {
+             const a = document.createElement('a');
+             a.href = link; a.target = "_blank"; a.className = "link-tag";
+             let icon = "🔗";
+             if (!name) name = "Final Deliverable";
+             a.innerHTML = `<span>${icon} ${name}</span>`;
+             container.appendChild(a);
+          }
+        });
+      }
+
+      function showResponse(response) {
+        const responseEl = document.getElementById('response-message');
+        
+        // --- START: NEW AND IMPROVED MESSAGE ---
+        responseEl.className = 'success';
+        responseEl.innerHTML = `
+          <p style="font-size: 1.2rem; margin-top: 0;">Thank you! Your action item has been successfully submitted.</p>
+          <p style="font-size: 0.9rem; color: #333;">
+            Your request has been added to the intake queue for processing. It will appear on your "My Action Items" portal after it has been reviewed and assigned by the ${workgroupName} team.
+          </p>
+        `;
+        // --- END: NEW AND IMPROVED MESSAGE ---
+        
+        responseEl.style.display = 'block';
+        document.getElementById('intake-form').style.display = 'none';
+
+        // The redirect logic remains the same
+        google.script.run.withSuccessHandler(url => {
+          if(url) {
+            responseEl.innerHTML += `<br/><p style="font-size: 0.9rem;">You will be redirected to the status portal shortly... <a href="${url}">Click here if you are not redirected.</a></p>`;
+            setTimeout(() => { window.top.location.href = url; }, 4000); // Increased delay slightly to allow reading
+          }
+        }).getGuestPortalUrl();
+      }
+      function showError(error) {
+        const responseEl = document.getElementById('response-message');
+        responseEl.className = 'error';
+        responseEl.textContent = 'Error: ' + error.message;
+        responseEl.style.display = 'block';
+        const btn = document.getElementById('submit-btn');
+        btn.disabled = false;
+        btn.textContent = 'Submit Action';
+      }
+    </script>
+  </body>
+</html>

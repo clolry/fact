@@ -1,0 +1,270 @@
+<div id="awf-builder-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+  <div class="modal" style="width: 800px; max-width: 95%; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-header">
+      <h3 style="margin:0;">Approval Workflow Templates</h3>
+      <button onclick="document.getElementById('awf-builder-overlay').style.display='none'" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+    </div>
+    
+    <div class="modal-body" style="padding: 20px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom: 20px;">
+        <p style="margin:0; color:#555;">Manage standard approval routing sequences.</p>
+        <button class="btn-primary" onclick="openAwfEditor()">+ New Template</button>
+      </div>
+
+      <table style="width:100%; border-collapse: collapse; margin-bottom: 20px;">
+        <thead>
+          <tr style="background:#f1f3f4; text-align:left; border-bottom:2px solid #ccc;">
+            <th style="padding:10px;">Name</th>
+            <th style="padding:10px;">Steps</th>
+            <th style="padding:10px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="awf-list-body">
+          <tr><td colspan="3" style="text-align:center; padding:20px;">Loading templates...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="awf-editor-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:2010; align-items:center; justify-content:center;">
+  <div class="modal" style="width: 700px; max-width: 95%; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-header">
+      <h3 id="awf-editor-title" style="margin:0;">Edit Approval Workflow</h3>
+      <button onclick="document.getElementById('awf-editor-overlay').style.display='none'" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <input type="hidden" id="awf-edit-oldname">
+      
+      <div class="form-group" style="display:flex; gap: 15px;">
+        <div style="flex:1;">
+            <label>Template Name</label>
+            <input type="text" id="awf-edit-name" placeholder="e.g. Executive Branch Review" style="width:100%; border:1px solid #ccc; padding:6px; border-radius:4px;">
+        </div>
+        <div style="flex:1;">
+            <label>Applies To</label>
+            <select id="awf-edit-appliesto" style="width:100%; border:1px solid #ccc; padding:6px; border-radius:4px;">
+                <option value="All">All Item Types</option>
+            </select>
+        </div>
+      </div>
+      
+      <h4>Routing Steps</h4>
+      <div id="awf-edit-steps" style="background:#f8f9fa; padding:15px; border-radius:6px; margin-bottom:15px; border:1px solid #ddd;">
+        <!-- Steps will be injected here -->
+      </div>
+      <button class="btn" type="button" onclick="addAwfStep()" style="margin-bottom:15px;">+ Add Step</button>
+      
+      <div id="awf-edit-status" style="color:var(--success); font-weight:bold; margin-bottom:10px; display:none;">Saved!</div>
+    </div>
+    <div class="modal-footer" style="padding: 15px 20px; border-top: 1px solid #eee; display:flex; justify-content:flex-end; gap:10px;">
+      <button class="btn" onclick="document.getElementById('awf-editor-overlay').style.display='none'">Cancel</button>
+      <button class="btn-primary" onclick="saveAwfTemplate()">Save Template</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentAwfTemplates = [];
+let awfEditStepsData = [];
+
+function openApprovalWorkflowBuilder() {
+  document.getElementById('awf-builder-overlay').style.display = 'flex';
+  loadAwfTemplates();
+}
+
+function loadAwfTemplates() {
+  const tbody = document.getElementById('awf-list-body');
+  tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px;">Loading...</td></tr>';
+  
+  google.script.run.withSuccessHandler(res => {
+    // Expected format: Array of {name: "Template", definition: [{step:1, ...}]}
+    // Since getWorkflowTemplates() returns this exact format!
+    currentAwfTemplates = res;
+    renderAwfTable();
+  }).withFailureHandler(err => {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:red;">Failed to load templates: ${err.message}</td></tr>`;
+  }).getWorkflowTemplates();
+}
+
+function renderAwfTable() {
+  const tbody = document.getElementById('awf-list-body');
+  tbody.innerHTML = '';
+  if (currentAwfTemplates.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:20px;">No templates found.</td></tr>';
+    return;
+  }
+  
+  currentAwfTemplates.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding:10px; font-weight:bold;">${t.name}</td>
+      <td style="padding:10px;">${t.definition.length} steps</td>
+      <td style="padding:10px;">
+         <button class="btn" style="padding:4px 8px; font-size:0.85em;" onclick="openAwfEditor('${t.name}')">Edit</button>
+         <button class="btn" style="padding:4px 8px; font-size:0.85em; color:#d93025; margin-left:5px;" onclick="deleteAwfTemplate('${t.name}')">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function deleteAwfTemplate(name) {
+  if(!confirm("Are you sure you want to delete template: " + name + "?")) return;
+  google.script.run.withSuccessHandler(() => {
+     loadAwfTemplates();
+  }).deleteApprovalWorkflowTemplate(name);
+}
+
+function openAwfEditor(templateName) {
+  const overlay = document.getElementById('awf-editor-overlay');
+  overlay.style.display = 'flex';
+  
+  const title = document.getElementById('awf-editor-title');
+  const nameInput = document.getElementById('awf-edit-name');
+  const oldNameInput = document.getElementById('awf-edit-oldname');
+  const appliesToSelect = document.getElementById('awf-edit-appliesto');
+  const statusMsg = document.getElementById('awf-edit-status');
+  statusMsg.style.display = 'none';
+  
+  // Populate dropdown from global types if available
+  let availableTypes = [];
+  const typeInput = document.getElementById('admin-settings-types');
+  if (typeInput && typeInput.value) {
+      availableTypes = typeInput.value.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  
+  appliesToSelect.innerHTML = '<option value="All">All Item Types</option>';
+  availableTypes.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      appliesToSelect.appendChild(opt);
+  });
+  
+  if (templateName) {
+    title.textContent = 'Edit Template';
+    const t = currentAwfTemplates.find(x => x.name === templateName);
+    nameInput.value = t.name;
+    oldNameInput.value = t.name;
+    appliesToSelect.value = t.appliesTo || 'All';
+    awfEditStepsData = JSON.parse(JSON.stringify(t.definition));
+  } else {
+    title.textContent = 'New Template';
+    nameInput.value = '';
+    oldNameInput.value = '';
+    appliesToSelect.value = 'All';
+    awfEditStepsData = [];
+    addAwfStep(); // Start with 1 step
+  }
+  
+  renderAwfStepsEditor();
+}
+
+function renderAwfStepsEditor() {
+  const container = document.getElementById('awf-edit-steps');
+  container.innerHTML = '';
+  
+  if(awfEditStepsData.length === 0){
+    container.innerHTML = '<p style="color:#666; font-style:italic;">No steps defined.</p>';
+    return;
+  }
+  
+  awfEditStepsData.forEach((step, idx) => {
+    const div = document.createElement('div');
+    div.style = "background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 10px; position:relative;";
+    
+    div.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+            <span style="font-weight:bold; color:#1a73e8;">Step ${step.step}</span>
+            <button type="button" onclick="removeAwfStep(${idx})" style="background:none; border:none; color:#d93025; cursor:pointer;">&times; Remove</button>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <div style="flex:1;">
+                <label style="font-size:0.85em; font-weight:bold; color:#555;">Role</label>
+                <input type="text" value="${step.role || ''}" onchange="updateAwfData(${idx}, 'role', this.value)" placeholder="e.g. Branch Chief" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:0.85em; font-weight:bold; color:#555;">Routing Type</label>
+                <select onchange="updateAwfData(${idx}, 'type', this.value)" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;">
+                    <option value="Sequential" ${step.type === 'Sequential' ? 'selected' : ''}>Sequential (One at a time)</option>
+                    <option value="Parallel" ${step.type === 'Parallel' ? 'selected' : ''}>Parallel (All simultaneously)</option>
+                    <option value="FYI" ${step.type === 'FYI' ? 'selected' : ''}>FYI (Awareness Only / No Routing Pause)</option>
+                </select>
+            </div>
+        </div>
+        <div>
+            <label style="font-size:0.85em; font-weight:bold; color:#555;">Approver Emails (comma separated)</label>
+            <input type="text" class="multi-autocomplete" value="${(step.approvers || []).join(', ')}" onchange="updateAwfApprovers(${idx}, this.value)" placeholder="user1@gsa.gov, user2@gsa.gov" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;">
+        </div>
+    `;
+    container.appendChild(div);
+  });
+  if(typeof initializeAutocomplete === 'function') initializeAutocomplete();
+}
+
+function addAwfStep() {
+  awfEditStepsData.push({
+    step: awfEditStepsData.length + 1,
+    role: "Reviewer",
+    type: "Sequential",
+    approvers: [""],
+    status: "Future"
+  });
+  renderAwfStepsEditor();
+}
+
+function removeAwfStep(idx) {
+  awfEditStepsData.splice(idx, 1);
+  awfEditStepsData.forEach((s, i) => s.step = i + 1);
+  renderAwfStepsEditor();
+}
+
+function updateAwfData(idx, field, value) {
+  awfEditStepsData[idx][field] = value;
+}
+
+function updateAwfApprovers(idx, valStr) {
+  awfEditStepsData[idx].approvers = valStr.split(',').map(s => s.trim()).filter(s => s);
+}
+
+function saveAwfTemplate() {
+  const name = document.getElementById('awf-edit-name').value.trim();
+  const oldName = document.getElementById('awf-edit-oldname').value;
+  const appliesTo = document.getElementById('awf-edit-appliesto').value;
+  
+  if (!name) { showAlert("Template Name is required."); return; }
+  
+  // GSA Domain Validation
+  let allEmails = [];
+  awfEditStepsData.forEach(s => {
+      if (s.approvers) {
+          s.approvers.forEach(a => {
+              if (a) allEmails.push(a.trim().toLowerCase());
+          });
+      }
+  });
+  const invalidEmails = allEmails.filter(e => e && !e.endsWith('@gsa.gov'));
+  if (invalidEmails.length > 0) {
+      showAlert("Error: The following email addresses are not valid GSA contacts (" + invalidEmails.join(', ', "Error", "error") + "). All approvers must have an @gsa.gov address.");
+      return;
+  }
+
+  
+  const statusMsg = document.getElementById('awf-edit-status');
+  const btn = document.querySelector('#awf-editor-overlay .btn-primary');
+  btn.textContent = "Saving...";
+  
+  google.script.run.withSuccessHandler(() => {
+    btn.textContent = "Save Template";
+    statusMsg.style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('awf-editor-overlay').style.display = 'none';
+      window.location.reload();
+    }, 1000);
+  }).withFailureHandler((err) => {
+    btn.textContent = "Save Template";
+    showAlert("Error saving: " + err.message, "Error", "error");
+  }).saveApprovalWorkflowTemplate(name, oldName, appliesTo, "Global", JSON.stringify(awfEditStepsData));
+}
+</script>
