@@ -29,6 +29,7 @@ jobs:
           echo 'Deploying to Sandbox Environment...'
           echo '{"scriptId":"1UFy82UYrg9D_hmcU78bTU61RrECCvxUumiBE-VsKtAoSSluGxY-0BW_x","rootDir":"."}' > .clasp.json
           clasp push --force
+          clasp deploy -i AKfycbx9e0QpqXduA2ylCVUDUOHopMzEH9qyf-y6JbpkVoEGi63QkpP_46InJ83WFqmQh74K -d "Auto-deploy via GitHub Actions"
           
       - name: Configure PMSC Production Deployment
         if: github.ref == 'refs/heads/main'
@@ -36,6 +37,7 @@ jobs:
           echo 'Deploying to PMSC Production...'
           echo '{"scriptId":"1ltCzOYebrPSRE53UkpALyMJajtoLprGqEn8f2qYsHxV2Ue5W9StUfOXl","rootDir":"."}' > .clasp.json
           clasp push --force
+          clasp deploy -i AKfycby5mvn-TjDwksmLdr1jAfMVsbxkMzE0F25jrl5fgGOLDQPLccSXah-uOLjf3werlGSdrg -d "Auto-deploy via GitHub Actions"
           
       - name: Configure FCA Production Deployment
         if: github.ref == 'refs/heads/main'
@@ -43,3 +45,4 @@ jobs:
           echo 'Deploying to FCA Production...'
           echo '{"scriptId":"1N6Cyyg1uFKD0VBdozcLJqZlWhP_9P0MsjgcAvV6iC-FB6wyiYL-LVppC","rootDir":"."}' > .clasp.json
           clasp push --force
+          clasp deploy -i AKfycbwuyAVv_wgqDtxyeW9C2gllN6juiUwek_ssQTEvsfFcQsh8CihKq3J7AVV6NhsQ8BHpmw -d "Auto-deploy via GitHub Actions"
