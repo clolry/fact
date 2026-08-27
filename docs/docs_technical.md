@@ -1,0 +1,80 @@
+# FACT Application - System & Technical Documentation
+
+This document serves as the technical reference for developers, IT administrators, and maintainers of the FACT application. It outlines the architecture, data structures, and deployment pipelines.
+
+## 1. System Architecture Overview
+
+FACT is built entirely within the Google Workspace ecosystem to ensure maximum security, native integration, and zero external hosting costs.
+
+- **Frontend:** A Single Page Application (SPA) built with HTML, CSS, and Vanilla JavaScript, adhering to Material Design principles. It runs securely within an iframe via the GAS `HtmlService`.
+- **Backend:** Google Apps Script (V8 Engine) acts as the serverless backend, handling API requests via `google.script.run`.
+- **Database:** A standard Google Spreadsheet acts as the primary data store, using specific sheets as tables.
+- **File Storage:** Native integration with Google Drive via the Drive API and Google Picker API.
+
+---
+
+## 2. Data Model (Google Sheets Schema)
+
+The backend relies on a Google Spreadsheet bound to the script (or referenced by ID). The core sheets acting as tables include:
+
+### `Tasks` / `Sub_Tasks` / `Projects`
+- **Primary Key:** Unique ID (e.g., TSK-1001).
+- **Core Columns:** Title, Description, Assignee, Status, Deadline.
+- **Workflow Columns:** `WorkflowStep` (JSON string defining the active routing).
+
+### `Settings` (Optional/Hidden)
+- Stores JSON configurations for global variables (e.g., dropdown options, default branding).
+
+---
+
+## 3. Key Backend Modules
+
+The codebase is modularized into several key `.js` files for maintainability:
+
+- **`Code.js`**: The main entry point. Contains `doGet(e)` for routing the web app, handling URL parameters (like `?page=reports` or `?page=action`), and processing email approval callbacks.
+- **`FACT_DataService.js`**: Abstraction layer for interacting with the Google Sheet. Handles reading, writing, and querying rows.
+- **`FACT_WorkflowEngine.js`**: The core logic for the dynamic approval workflows. It parses the JSON workflow definitions, determines the active step, and triggers emails.
+- **`FACT_DriveService.js`**: Handles authentication and backend processing for the Google Drive Picker and file attachments.
+- **`FACT_NotificationService.js`**: Centralized module for formatting and sending HTML emails (e.g., approval requests, daily digests).
+
+---
+
+## 4. Background Triggers & Automation
+
+FACT relies on Google Apps Script Time-Driven Triggers to handle background processing without user interaction.
+
+- **Daily Digest (7 AM):** A trigger runs `generateDailyDigest()` every morning between 7 AM and 8 AM. It compiles data regarding overdue tasks and pending approvals into an email.
+- **Deadline Reminders (6 AM):** A trigger scans the `Tasks` sheet for deadlines occurring within 48 hours and dispatches reminders via `FACT_NotificationService.js`.
+
+> [!WARNING]
+> If the script is redeployed or copied, these triggers must be manually re-initialized by an Admin running the setup function in the GAS editor.
+
+---
+
+## 5. CI/CD Pipeline & Environments
+
+The codebase is version-controlled via GitHub (`clolry/fact`) and deployed using GitHub Actions combined with `clasp` (Command Line Apps Script Projects).
+
+### Environments
+We maintain three active environments:
+1. **PMSC Production:** (Script ID: `1ltCzOYebrPSRE53UkpALyMJajtoLprGqEn8f2qYsHxV2Ue5W9StUfOXl`) - Main operating environment for PMSC.
+2. **FCA Production:** (Script ID: `1N6Cyyg1uFKD0VBdozcLJqZlWhP_9P0MsjgcAvV6iC-FB6wyiYL-LVppC`) - Main operating environment for FCA.
+3. **Sandbox:** (Script ID: `1UFy82UYrg9D_hmcU78bTU61RrECCvxUumiBE-VsKtAoSSluGxY-0BW_x`) - Staging environment for testing new features safely.
+
+### Deployment Workflow
+The `.github/workflows/deploy.yml` handles automated deployments.
+- **`main` branch pushes:** Automatically build and deploy via `clasp push` to both PMSC Production and FCA Production.
+- **`sandbox` or `dev` branch pushes:** Automatically deploy to the Sandbox environment.
+
+> [!CAUTION]
+> Never edit the code directly in the GAS Editor in the browser. Always pull to your local machine, make edits, and push via git to trigger the CI/CD pipeline. Direct edits in the browser will be overwritten by the next GitHub Action deployment.
+
+---
+
+## 6. Security & Access Levels
+
+FACT implements a role-based access control (RBAC) system verified against the active Google session (`Session.getActiveUser().getEmail()`).
+
+- **Authentication:** Handled natively by Google Workspace. Users must be logged into a valid `@gsa.gov` account.
+- **Authorization:** `Code.js` checks the user's email against an Admin/Exec list before rendering specific pages or returning data.
+- **Data Exposure:** The SPA only receives data from the backend that the user is authorized to view. The raw Google Sheet should be restricted to "View Only" or completely hidden from end-users to prevent direct data tampering.
