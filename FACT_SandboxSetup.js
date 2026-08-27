@@ -120,3 +120,38 @@ function setupTriggers_() {
     console.log("Trigger for sendInternalDueReminders_ installed successfully.");
   }
 }
+
+/**
+ * Generates sample demo data for Executive Training in the Sandbox environment.
+ * Run this function from the Sandbox Apps Script editor.
+ */
+function generateDemoData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tasksSheet = ss.getSheetByName('Tasks');
+  
+  if (!tasksSheet) {
+    console.error("Tasks sheet not found!");
+    return;
+  }
+  
+  // Format: ['ID', 'Title', 'Type', 'ParentID', 'Owner', 'DueDate', 'Status', 'Description', 'Complexity', 'Urgency', 'WorkflowStep', 'ThreadID', 'DriveLink', 'FolderID', 'RecDate', 'IntDue', 'DataCallNo', 'Requestor', 'Rank', 'CompletedDate', 'Archived', 'StatusSummary', 'Assigned', 'NotificationSchedule', 'ApprovalType', 'PriorApprover', 'Background', 'OrgCode', 'Primary_Doc_ID']
+  
+  const today = new Date();
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const nextWeek = new Date(today); nextWeek.setDate(nextWeek.getDate() + 7);
+  
+  // Demo Row 1: A task in progress
+  const row1 = ['DEMO-001', 'Draft Quarterly Report', 'Task', '', 'Jane Doe', nextWeek.toISOString(), 'In Progress', 'Drafting the Q3 metrics report for the executive team.', 'Medium', 'Medium', '', '', '', '', today.toISOString(), nextWeek.toISOString(), '', 'Leadership', '1', '', '', 'On Track', 'Jane Doe', '', '', '', '', 'FCA', ''];
+  
+  // Demo Row 2: A task pending approval (requires executive action)
+  const row2 = ['DEMO-002', 'Strategic Plan Realignment', 'Project', '', 'John Smith', tomorrow.toISOString(), 'Pending Review', 'Awaiting final approval from the Executive Officer.', 'High', 'High', 'Executive Approval', '', '', '', today.toISOString(), tomorrow.toISOString(), '', 'Planning Office', '2', '', '', 'Action Needed', 'Executive Officer', '', 'Document Approval', '', 'Pending final sign-off.', 'FCA', ''];
+  
+  // Demo Row 3: A standard task in the backlog
+  const row3 = ['DEMO-003', 'Update Staff Roster', 'Task', '', 'Alice Admin', nextWeek.toISOString(), 'To Do', 'Ensure all new hires from September are included.', 'Low', 'Low', '', '', '', '', today.toISOString(), nextWeek.toISOString(), '', 'HR', '3', '', '', 'Not Started', 'Alice Admin', '', '', '', '', 'FCA', ''];
+  
+  tasksSheet.appendRow(row1);
+  tasksSheet.appendRow(row2);
+  tasksSheet.appendRow(row3);
+  
+  console.log("Demo data generated successfully! 3 tasks added to the Tasks sheet.");
+}
