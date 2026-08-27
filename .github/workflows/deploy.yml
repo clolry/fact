@@ -1,8 +1,8 @@
-name: Deploy to Google Apps Script (PMSC Prod)
+name: Deploy to Google Apps Script
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "sandbox", "dev" ]
 
 jobs:
   deploy:
@@ -23,5 +23,23 @@ jobs:
         run: |
           echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
           
-      - name: Push to GAS
-        run: clasp push --force
+      - name: Configure Sandbox Deployment
+        if: github.ref == 'refs/heads/sandbox' || github.ref == 'refs/heads/dev'
+        run: |
+          echo 'Deploying to Sandbox Environment...'
+          echo '{"scriptId":"1UFy82UYrg9D_hmcU78bTU61RrECCvxUumiBE-VsKtAoSSluGxY-0BW_x","rootDir":"."}' > .clasp.json
+          clasp push --force
+          
+      - name: Configure PMSC Production Deployment
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo 'Deploying to PMSC Production...'
+          echo '{"scriptId":"1ltCzOYebrPSRE53UkpALyMJajtoLprGqEn8f2qYsHxV2Ue5W9StUfOXl","rootDir":"."}' > .clasp.json
+          clasp push --force
+          
+      - name: Configure FCA Production Deployment
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo 'Deploying to FCA Production...'
+          echo '{"scriptId":"1N6Cyyg1uFKD0VBdozcLJqZlWhP_9P0MsjgcAvV6iC-FB6wyiYL-LVppC","rootDir":"."}' > .clasp.json
+          clasp push --force

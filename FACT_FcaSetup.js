@@ -73,3 +73,49 @@ function initializeFcaSheet() {
   const defaultSheet = ss.getSheetByName('Sheet1');
   if (defaultSheet) ss.deleteSheet(defaultSheet);
 }
+
+/**
+ * Registers all necessary time-driven triggers for the application.
+ * Run this ONCE from the Apps Script editor for any new environment.
+ */
+function setupSystemTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  
+  // Helper to check if trigger already exists
+  const triggerExists = (funcName) => triggers.some(t => t.getHandlerFunction() === funcName);
+
+  // 1. Recurring Reports (Runs Daily at 7 AM)
+  if (!triggerExists('runScheduledReports')) {
+    ScriptApp.newTrigger('runScheduledReports')
+      .timeBased()
+      .atHour(7)
+      .everyDays(1)
+      .create();
+    console.log('Created trigger for runScheduledReports (Daily at 7 AM)');
+  } else {
+    console.log('runScheduledReports trigger already exists.');
+  }
+
+  // 2. Workflow Deadlines (Runs Daily at 6 AM)
+  if (!triggerExists('processWorkflowDeadlines')) {
+    ScriptApp.newTrigger('processWorkflowDeadlines')
+      .timeBased()
+      .atHour(6)
+      .everyDays(1)
+      .create();
+    console.log('Created trigger for processWorkflowDeadlines (Daily at 6 AM)');
+  }
+
+  // 3. Internal Due Reminders (Runs Daily at 8 AM)
+  if (!triggerExists('sendInternalDueReminders_')) {
+    ScriptApp.newTrigger('sendInternalDueReminders_')
+      .timeBased()
+      .atHour(8)
+      .everyDays(1)
+      .create();
+    console.log('Created trigger for sendInternalDueReminders_ (Daily at 8 AM)');
+  }
+  
+  console.log('Trigger setup complete!');
+}
+
