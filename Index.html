@@ -2011,11 +2011,11 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
             </div>
             
             <div class="form-grid">
-               <!-- Row 1: Type & Status / Phase -->
+               <!-- Row 1: Type (Left) & Status / Phase (Right) -->
                <div><label>Type</label><select id="f_type" onchange="toggleDCFields()"></select></div>
                <div><label>Status / Phase</label><select id="f_status" onchange="checkDoneDate()"></select></div>
                
-               <!-- Row 2: Owner & Assigned Team -->
+               <!-- Row 2: Owner (Left) & Urgency (Right) -->
                <div>
                  <label style="display:flex; justify-content:space-between; align-items:center;">
                    <span>Owner</span>
@@ -2023,6 +2023,9 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
                  </label>
                  <input type="text" id="f_owner" autocomplete="off" required placeholder="Type to search directory...">
                </div>
+               <div><label>Urgency</label><select id="f_urgency"><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></div>
+               
+               <!-- Row 3: Assigned Team (Left) & Complexity (Right) -->
                <div>
                  <label style="display:flex; justify-content:space-between; align-items:center;">
                    <span>Assigned Team</span>
@@ -2030,9 +2033,6 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
                  </label>
                  <textarea id="f_assigned" rows="4" placeholder="Type to search directory, then comma for next..." autocomplete="off" style="font-family:inherit; font-size:inherit; resize:vertical;"></textarea>
                </div>
-               
-               <!-- Row 3: Urgency & Complexity -->
-               <div><label>Urgency</label><select id="f_urgency"><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></div>
                <div><label>Complexity</label><select id="f_complex"><option>Low</option><option>Medium</option><option>High</option></select></div>
                
                <!-- Row 4: 4 Date Fields -->
@@ -8961,20 +8961,20 @@ function openDrivePicker(target = 'attachments') {
     gapi.load('picker', {'callback': onPickerApiLoad});
 }
 function onPickerApiLoad() {
-    if (oauthToken) {
+    google.script.run.withSuccessHandler(function(token) {
+        oauthToken = token;
         createPicker();
-    } else {
-        google.script.run.withSuccessHandler(function(token) {
-            oauthToken = token;
-            createPicker();
-        }).getOAuthToken();
-    }
+    }).getOAuthToken();
 }
 function createPicker() {
-    if (google.picker) {
+    if (google.picker && oauthToken) {
+        const origin = (typeof google !== 'undefined' && google.script && google.script.host && google.script.host.origin)
+            ? google.script.host.origin
+            : 'https://script.google.com';
+
         let pickerBuilder = new google.picker.PickerBuilder()
             .setOAuthToken(oauthToken)
-            .setOrigin('https://script.google.com')
+            .setOrigin(origin)
             .setCallback(pickerCallback);
             
             const myDriveView = new google.picker.DocsView()
