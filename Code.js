@@ -73,11 +73,11 @@ function routeRequest_(e, accessLevel) {
           const steps = Array.isArray(parsed) ? parsed : (parsed.steps || []);
           const activeStep = steps.find(s => s.status === 'Pending');
           
-          const userEmail = (e.parameter.u || Session.getActiveUser().getEmail() || '').toLowerCase().trim();
           const extractEmail = (str) => {
               const match = str.match(/<([^>]+)>/);
               return match ? match[1].toLowerCase().trim() : str.toLowerCase().trim();
           };
+          const userEmail = extractEmail((e.parameter.u || Session.getActiveUser().getEmail() || ''));
           
           if (activeStep) {
               const activeApprovers = (activeStep.approvers || []).map(extractEmail);

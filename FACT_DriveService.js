@@ -15,16 +15,33 @@ function saveItem(form, changeLog) {
   // earlier steps (e.g. row update) are not reverted. Full transactional refactor is future work.
   const isNew = (!form.ID || String(form.ID).trim() === '' || form.ID === 'New Item');
 
-  // 1. Find existing row (if editing)
-  const { sheetName, row, oldOwner, oldDriveLink, folderId: existingFolderId } =
+  // 1. Find existing row (if editing); also detects cross-sheet type changes
+  const { sheetName, row, oldOwner, oldDriveLink, folderId: existingFolderId, sourceSheetName, sourceRow } =
     findExistingRow_(form, isNew);
 
-  // 2. Generate ID
-  const finalId = isNew ? generateItemId_(form.Type) : String(form.ID).trim();
+  // Detect if this is a cross-sheet type migration (e.g. Project → Task)
+  const isTypeMigration = !isNew && sourceSheetName && sourceRow > 0;
 
-  // 3. Drive folder provisioning (new items only)
+  // 2. Generate ID
+  // For type migrations, generate a brand-new ID with the correct prefix for the new type.
+  // The old ID is retired; all references (notes, audit log) carry the old ID but the record
+  // itself gets a new canonical ID in the destination sheet.
+  let finalId;
+  if (isNew) {
+    finalId = generateItemId_(form.Type);
+  } else if (isTypeMigration) {
+    finalId = generateItemId_(form.Type);
+    // Log the migration so there's a paper trail linking old ID to new ID
+    console.log(`Type migration: ${form.ID} (${sourceSheetName}) → ${finalId} (${sheetName})`);
+    changeLog = changeLog || [];
+    changeLog.push(`Type changed from ${sourceSheetName.replace('s','').replace('_Tasks','Sub-Task')} to ${form.Type}. Old ID: ${form.ID} → New ID: ${finalId}`);
+  } else {
+    finalId = String(form.ID).trim();
+  }
+
+  // 3. Drive folder provisioning (new items only, or migrations that need a folder)
   const { driveLink, folderId } = provisionDriveFolder_(
-    form, finalId, isNew, existingFolderId
+    form, finalId, isNew || isTypeMigration, isTypeMigration ? '' : existingFolderId
   );
 
   // 4. Intake artifact processing (new items promoted from intake)
@@ -33,30 +50,55 @@ function saveItem(form, changeLog) {
   );
 
   // 5. Shortcut creation (existing items with new links added)
-  if (!isNew && folderId2) {
+  if (!isNew && !isTypeMigration && folderId2) {
     createLinkShortcuts_(folderId2, oldDriveLink, driveLink2);
   }
 
+  // 5.4 For type migrations: rename & move the existing Drive folder to the new type's base folder
+  let finalFolderId = folderId2;
+  let finalDriveLink = driveLink2;
+  if (isTypeMigration && existingFolderId) {
+    try {
+      const migrationResult = migrateItemFolder_(existingFolderId, form.ID, finalId, form.Title, form.Type, oldDriveLink);
+      if (migrationResult.folderId) finalFolderId = migrationResult.folderId;
+      if (migrationResult.driveLink) finalDriveLink = migrationResult.driveLink;
+    } catch(e) {
+      console.error(`Folder migration failed: ${e.message}`);
+      // Non-fatal: keep old folder reference
+      finalFolderId = existingFolderId;
+      finalDriveLink = oldDriveLink;
+    }
+  }
+
   // 5.5 Grant Folder Access to Owner and Assigned Team
-  if (folderId2) {
-    grantFolderAccessFast_(folderId2, [form.Owner || '', ...(form.Assigned || '').split(',')]);
+  if (finalFolderId) {
+    grantFolderAccessFast_(finalFolderId, [form.Owner || '', ...(form.Assigned || '').split(',')]);
   }
 
   // 5.8 Primary Doc handling
-  if (folderId2 && form.Primary_Doc_ID) {
-    handlePrimaryDoc_(folderId2, form.Primary_Doc_ID);
+  if (finalFolderId && form.Primary_Doc_ID) {
+    handlePrimaryDoc_(finalFolderId, form.Primary_Doc_ID);
   }
 
-  // 6. Write to sheet
-  writeItemToSheet_(form, finalId, sheetName, row, isNew, driveLink2, folderId2);
+  // 5.9 For type migrations: delete the old row from the source sheet BEFORE writing the new one
+  if (isTypeMigration) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sourceSh = ss.getSheetByName(sourceSheetName);
+    if (sourceSh) {
+      sourceSh.deleteRow(sourceRow);
+    }
+  }
 
-  // 7. Assignment notification
-  if (!isNew && oldOwner.trim() !== (form.Owner || '').trim() && form.Owner) {
+  // 6. Write to sheet (for migrations, row=-1 so it appends as new row)
+  writeItemToSheet_(form, finalId, sheetName, row, isNew || isTypeMigration, finalDriveLink, finalFolderId);
+
+  // 7. Assignment notification (only for true owner changes on non-migration edits)
+  if (!isNew && !isTypeMigration && oldOwner.trim() !== (form.Owner || '').trim() && form.Owner) {
     sendAssignmentNotification_(finalId, form.Title, form.Owner);
   }
 
   // 8. Finalize: notes, logging, intake cleanup
-  finalizeItem_(form, finalId, isNew, sheetName, changeLog);
+  finalizeItem_(form, finalId, isNew || isTypeMigration, sheetName, changeLog);
 
   // 9. Stakeholder auto-registration
   try {
@@ -80,11 +122,26 @@ function saveItem(form, changeLog) {
 
   return { success: true, id: finalId };
 }
+
+/**
+ * Maps a record type to its canonical sheet name.
+ * @param {string} type The record Type value.
+ * @returns {string}
+ * @private
+ */
+function typeToSheetName_(type) {
+  if (type === 'Project') return 'Projects';
+  if (type === 'Sub-Task') return 'Sub_Tasks';
+  return 'Tasks';
+}
+
 /**
  * Searches for an existing item across Tasks and Projects sheets.
+ * Detects cross-sheet type changes (e.g. Project → Task) and returns
+ * migration metadata so saveItem can delete the old row.
  * @param {object} form The form data.
  * @param {boolean} isNew Whether this is a new item.
- * @returns {{sheetName: string, row: number, oldOwner: string, oldDriveLink: string, folderId: string}}
+ * @returns {{sheetName: string, row: number, oldOwner: string, oldDriveLink: string, folderId: string, sourceSheetName: string, sourceRow: number}}
  * @private
  */
 function findExistingRow_(form, isNew) {
@@ -96,6 +153,10 @@ function findExistingRow_(form, isNew) {
   let oldDriveLink = '';
   let folderId = form.FolderID || '';
 
+  // For cross-sheet migration tracking
+  let sourceSheetName = '';
+  let sourceRow = -1;
+
   if (!isNew) {
     const searchOrder = ['Tasks', 'Projects', 'Sub_Tasks'];
     for (const name of searchOrder) {
@@ -106,31 +167,43 @@ function findExistingRow_(form, isNew) {
       const allIds = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
       const rowIndex = allIds.findIndex(row => String(row[0]).trim() === id);
       if (rowIndex !== -1) {
-          sheetName = name;
-          row = rowIndex + 2;
-          const oldData = sh.getRange(row, 1, 1, 14).getValues()[0];
+          const foundRow = rowIndex + 2;
+          const oldData = sh.getRange(foundRow, 1, 1, 14).getValues()[0];
           const ownerColIndex = (name === 'Projects') ? 3 : 4;
           oldOwner = oldData[ownerColIndex] || '';
           oldDriveLink = oldData[12] || '';
-          folderId = oldData[13] || '';
+          folderId = oldData[13] || form.FolderID || '';
+
+          // Determine the sheet the record SHOULD live in based on the new type
+          const targetSheet = typeToSheetName_(form.Type);
+
+          if (targetSheet !== name) {
+            // TYPE CHANGE DETECTED: record needs to move sheets
+            sourceSheetName = name;   // Where the record currently lives (will be deleted)
+            sourceRow = foundRow;
+            sheetName = targetSheet;  // Where the record will be written (as a new row)
+            row = -1;                 // Force append (isNew path) in writeItemToSheet_
+          } else {
+            // Normal edit: same sheet
+            sheetName = name;
+            row = foundRow;
+          }
           break;
       }
-      if (sheetName) break;
     }
   }
 
-  // Determine target sheet for new items
+  // Determine target sheet for brand-new items
   if (!sheetName) {
-    if (form.Type === 'Project') sheetName = 'Projects';
-    else if (form.Type === 'Sub-Task') sheetName = 'Sub_Tasks';
-    else sheetName = 'Tasks';
+    sheetName = typeToSheetName_(form.Type);
   }
 
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`Target sheet '${sheetName}' not found.`);
 
-  return { sheetName, row, oldOwner, oldDriveLink, folderId };
+  return { sheetName, row, oldOwner, oldDriveLink, folderId, sourceSheetName, sourceRow };
 }
+
 /**
  * Generates a new unique item ID using a global counter in Script Properties.
  * @param {string} type The item type (e.g. 'Project', 'Task', 'Data Call').
@@ -568,10 +641,70 @@ function grantFolderAccessFast_(folderId, identifiers) {
 }
 
 /**
+ * Renames an existing Drive folder to match the new item ID and moves it to the
+ * correct base folder for the new type as configured in Drive_Config.
+ * Called during a cross-sheet type migration (e.g. Project → Task).
+ *
+ * @param {string} folderId    The existing Drive folder ID.
+ * @param {string} oldId       The old item ID (e.g. "PROJ-1234").
+ * @param {string} newId       The new item ID (e.g. "TASK-1067").
+ * @param {string} title       The item title.
+ * @param {string} newType     The new item type (e.g. "Task").
+ * @param {string} oldDriveLink The old DriveLink string (to update the folder URL line).
+ * @returns {{folderId: string, driveLink: string}}
+ * @private
+ */
+function migrateItemFolder_(folderId, oldId, newId, title, newType, oldDriveLink) {
+  const folder = DriveApp.getFolderById(folderId);
+
+  // 1. Rename to new ID format
+  const newFolderName = `${newId}: ${title}`;
+  folder.setName(newFolderName);
+
+  // 2. Move to the correct base folder for the new type
+  try {
+    const driveConfigMap = getDriveConfigMap_();
+    const config = driveConfigMap.get((newType || '').trim().toLowerCase());
+    if (config && config.baseFolderId) {
+      let cleanBaseId = config.baseFolderId;
+      const baseMatch = cleanBaseId.match(/[-\w]{25,}/);
+      if (baseMatch) cleanBaseId = baseMatch[0];
+
+      const fiscalYear = getCurrentFiscalYear_();
+      const destBase = DriveApp.getFolderById(cleanBaseId);
+      const fyFolder = getOrCreateSubfolder_(destBase, fiscalYear);
+
+      // Move folder: remove from all current parents, add to new parent
+      const currentParents = folder.getParents();
+      folder.moveTo(fyFolder);
+
+      console.log(`Folder ${folderId} moved to ${newType} base folder (${fyFolder.getName()})`);
+    }
+  } catch(e) {
+    console.error(`Could not move folder to new base: ${e.message}`);
+    // Non-fatal — folder was renamed but stays in place
+  }
+
+  // 3. Build the updated driveLink: replace the old folder URL line with the new one
+  const newFolderUrl = folder.getUrl();
+  let newDriveLink = oldDriveLink || '';
+  // Replace the old folder URL if it's there; otherwise prepend the new one
+  const folderUrlPattern = /https:\/\/drive\.google\.com\/drive\/folders\/[^\s\n]+/;
+  if (folderUrlPattern.test(newDriveLink)) {
+    newDriveLink = newDriveLink.replace(folderUrlPattern, newFolderUrl);
+  } else {
+    newDriveLink = `${newFolderUrl}\n${newDriveLink}`.trim();
+  }
+
+  return { folderId: folder.getId(), driveLink: newDriveLink };
+}
+
+/**
  * Reads the Drive_Config sheet and returns a Map mapping item types to their base/template folder configs.
  * @returns {Map<string, {baseFolderId: string, templateFolderId: string}>}
  * @private
  */
+
 function getDriveConfigMap_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const map = new Map();
@@ -590,3 +723,11 @@ function getDriveConfigMap_() {
   return map;
 }
 
+/**
+ * Returns a short-lived OAuth2 token for the currently executing user.
+ * Called by the client-side Google Drive Picker via google.script.run.
+ * @returns {string} The OAuth token string.
+ */
+function getOAuthToken() {
+  return ScriptApp.getOAuthToken();
+}

@@ -1321,30 +1321,53 @@ function buildStakeholderMap_() {
  * @private
  */
 function isUserOnCard_(userEmail, userDisplayName, nameToEmail, ...cardFields) {
-  // Flatten and clean all values from card fields
-  // Assigned can be comma-separated (e.g. "Alice, Bob")
-  const allPeopleOnCard = cardFields
+  // Helper: extract bare email from "Name <email>" format stored by directory autocomplete
+  const extractBareEmail = (str) => {
+    const match = str.match(/<([^>]+)>/);
+    return match ? match[1].toLowerCase().trim() : null;
+  };
+
+  // Helper: extract just the display-name portion from "Name <email>" format
+  const extractDisplayName = (str) => {
+    const match = str.match(/^(.+?)\s*<[^>]+>$/);
+    return match ? match[1].toLowerCase().trim() : null;
+  };
+
+  // Flatten and clean all values from card fields.
+  // Assigned can be comma-separated (e.g. "Alice Smith <a@b.com>, Bob Jones <b@c.com>")
+  // NOTE: We must NOT split on commas inside angle brackets, so we split then re-join tokens
+  // that were accidentally split mid-"Name <email>" entry. In practice the autocomplete always
+  // appends a trailing ", " after each selection so each token is self-contained.
+  const rawTokens = cardFields
     .filter(Boolean)
     .flatMap(field => field.split(','))
     .map(p => p.trim().toLowerCase())
     .filter(Boolean);
 
-  for (const person of allPeopleOnCard) {
-    // Strategy 1: Resolve the person's name to an email via Stakeholders,
-    // then compare emails exactly
-    const resolvedEmail = nameToEmail.get(person);
+  for (const token of rawTokens) {
+    // Extract email from "Name <email>" if present
+    const embeddedEmail = extractBareEmail(token);
+    const embeddedName  = extractDisplayName(token);
+
+    // Strategy 1a: Direct embedded email match (handles "Name <email>" format from autocomplete)
+    if (embeddedEmail && embeddedEmail === userEmail) {
+      return true;
+    }
+
+    // Strategy 1b: Resolve the plain name portion to an email via Stakeholders map
+    const nameToLookup = embeddedName || token;
+    const resolvedEmail = nameToEmail.get(nameToLookup);
     if (resolvedEmail && resolvedEmail === userEmail) {
       return true;
     }
 
-    // Strategy 2: If no email can be resolved (person not in Stakeholders yet),
-    // fall back to exact display name match only
-    if (!resolvedEmail && userDisplayName && person === userDisplayName) {
+    // Strategy 2: If no email can be resolved, fall back to exact display name match
+    if (!resolvedEmail && !embeddedEmail && userDisplayName && token === userDisplayName) {
       return true;
     }
 
-    // Strategy 3: Direct email stored in field (edge case)
-    if (person === userEmail) {
+    // Strategy 3: Token is stored as a bare email directly
+    if (!embeddedEmail && token === userEmail) {
       return true;
     }
   }
