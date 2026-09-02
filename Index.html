@@ -8966,11 +8966,43 @@ function onPickerApiLoad() {
         createPicker();
     }).getOAuthToken();
 }
+function getPickerOrigin() {
+    // 1. In Chromium/Safari iframes (e.g. Google Sites embed), ancestorOrigins gives the true top origin
+    try {
+        if (window.location && window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+            return window.location.ancestorOrigins[window.location.ancestorOrigins.length - 1];
+        }
+    } catch (e) {}
+
+    // 2. Direct top window access if same origin
+    try {
+        if (window.top && window.top.location && window.top.location.origin) {
+            return window.top.location.origin;
+        }
+    } catch (e) {}
+
+    // 3. Document referrer (contains parent URL if cross-origin iframe)
+    if (document.referrer) {
+        try {
+            const refUrl = new URL(document.referrer);
+            if (refUrl.origin && refUrl.origin !== 'null') {
+                return refUrl.origin;
+            }
+        } catch (e) {}
+    }
+
+    // 4. If running in an iframe (such as embedded in Google Sites)
+    if (window.self !== window.top) {
+        return 'https://sites.google.com';
+    }
+
+    // 5. Default fallback to window location or script.google.com
+    return (window.location.protocol + '//' + window.location.host) || 'https://script.google.com';
+}
+
 function createPicker() {
     if (google.picker && oauthToken) {
-        const origin = (typeof google !== 'undefined' && google.script && google.script.host && google.script.host.origin)
-            ? google.script.host.origin
-            : 'https://script.google.com';
+        const origin = getPickerOrigin();
 
         let pickerBuilder = new google.picker.PickerBuilder()
             .setOAuthToken(oauthToken)
