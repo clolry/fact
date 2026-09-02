@@ -2016,8 +2016,20 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
                <div><label>Status / Phase</label><select id="f_status" onchange="checkDoneDate()"></select></div>
                
                <!-- Row 2: Owner & Assigned Team -->
-               <div><label>Owner</label><input type="text" id="f_owner" autocomplete="off" required></div>
-               <div><label>Assigned Team (Multi)</label><input type="text" id="f_assigned" placeholder="e.g. Alice, Bob" autocomplete="off"></div>
+               <div>
+                 <label style="display:flex; justify-content:space-between; align-items:center;">
+                   <span>Owner</span>
+                   <span style="font-size:0.7rem; font-weight:400; color:#888;">Single user — use directory</span>
+                 </label>
+                 <input type="text" id="f_owner" autocomplete="off" required placeholder="Type to search directory...">
+               </div>
+               <div>
+                 <label style="display:flex; justify-content:space-between; align-items:center;">
+                   <span>Assigned Team</span>
+                   <span style="font-size:0.7rem; font-weight:400; color:#888;">Multi-user, comma-separated</span>
+                 </label>
+                 <textarea id="f_assigned" rows="4" placeholder="Type to search directory, then comma for next..." autocomplete="off" style="font-family:inherit; font-size:inherit; resize:vertical;"></textarea>
+               </div>
                
                <!-- Row 3: Urgency & Complexity -->
                <div><label>Urgency</label><select id="f_urgency"><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></div>
@@ -5483,11 +5495,11 @@ function handleAutocompleteKeyUp(e) {
     const fullValue = e.target.value;
     let query = fullValue;
 
-    // If we are in the multi-person 'Assigned' field, only search for the text after the last comma.
-    if (activeAutocompleteField.id === 'f_assigned' || activeAutocompleteField.classList.contains('multi-autocomplete')) {
-        const parts = fullValue.split(',');
-        query = parts[parts.length - 1].trim(); // Get the last part and remove whitespace
-    }
+    // For ALL fields: only search for the text after the last comma.
+    // This handles f_assigned (multi-user) AND f_owner (single-user where someone
+    // accidentally typed a comma after a selection — we still want a fresh search).
+    const parts = fullValue.split(',');
+    query = parts[parts.length - 1].trim(); // Get the last part and remove whitespace
 
     if (query.length < 3) {
         document.getElementById('autocomplete-results').style.display = 'none';
@@ -5499,6 +5511,7 @@ function handleAutocompleteKeyUp(e) {
         google.script.run.withSuccessHandler(showAutocompleteResults).searchDirectory(query);
     }, 300); // Wait 300ms after user stops typing
 }
+
 
 /**
  * Displays the search results in the dropdown.
