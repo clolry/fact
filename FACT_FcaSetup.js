@@ -115,6 +115,15 @@ function setupSystemTriggers() {
       .create();
     console.log('Created trigger for sendInternalDueReminders_ (Daily at 8 AM)');
   }
+
+  // 4. Group Emails & Thread Sync (Runs every 10 minutes)
+  if (!triggerExists('processGroupEmails')) {
+    ScriptApp.newTrigger('processGroupEmails')
+      .timeBased()
+      .everyMinutes(10)
+      .create();
+    console.log('Created trigger for processGroupEmails (Every 10 minutes)');
+  }
   
   console.log('Trigger setup complete!');
 }

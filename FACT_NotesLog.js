@@ -657,8 +657,8 @@ function processGroupEmails() {
       }
     });
 
-    const emailQuery = groupEmailString.split(',').map(e => `to:"${e.trim()}"`).join(' OR ');
-    const query = `(${emailQuery}) newer_than:3d`;
+    const emailQuery = groupEmailString.split(',').map(e => `(to:"${e.trim()}" OR cc:"${e.trim()}")`).join(' OR ');
+    const query = `(${emailQuery}) newer_than:7d`;
     const threads = GmailApp.search(query, 0, 50);
     console.log(`Found ${threads.length} recent threads to check against the log.`);
 
@@ -678,6 +678,8 @@ function processGroupEmails() {
               const taskId = threadMap.get(threadId);
               const noteText = `📧 FOLLOW-UP EMAIL from ${msg.getFrom()} (${msg.getDate().toLocaleDateString()}):\n${msg.getPlainBody().substring(0, 3000)}`;
               addNote(taskId, noteText, 'System.Intake');
+              logSheet.appendRow([msgId, threadId, new Date()]);
+              processedMsgs.add(msgId);
             } else if (!intakeThreads.has(threadId)) {
               const subject = msg.getSubject();
               const from = msg.getFrom();
@@ -687,8 +689,9 @@ function processGroupEmails() {
               
               intakeSheet.appendRow([date, from, subject, body, 'Task', 'Medium', 'Pending Review', '', threadId]);
               intakeThreads.add(threadId);
+              logSheet.appendRow([msgId, threadId, new Date()]);
+              processedMsgs.add(msgId);
             }
-            logSheet.appendRow([msgId, threadId, new Date()]);
           } catch (e) {
             console.error(`Failed to process message ${msgId}. Error: ${e.message}`);
           }
