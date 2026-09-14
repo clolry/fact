@@ -951,7 +951,7 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
 #fact-modal-overlay.visible #fact-modal-box { transform: scale(1) translateY(0); }
 #fact-modal-icon { font-size: 2.5rem; margin-bottom: 12px; display: block; }
 #fact-modal-title { font-size: 1.2rem; font-weight: 700; color: #202124; margin: 0 0 10px; }
-#fact-modal-body { font-size: 0.95rem; color: #444; line-height: 1.5; margin-bottom: 20px; }
+#fact-modal-body { font-size: 0.95rem; color: #444; line-height: 1.5; margin-bottom: 20px; white-space: pre-wrap; }
 #fact-modal-input {
     width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1.5px solid #dadce0;
     border-radius: 8px; font-size: 0.95rem; font-family: inherit; margin-bottom: 16px;
@@ -4319,8 +4319,23 @@ function reviewIntake(idx) {
     document.getElementById('f_due_date').value = safeDate(data.suggestedDueDate);
     document.getElementById('f_rec_date').value = new Date().toISOString().split('T')[0]; // Pre-fill with today's date per user request
 
-    // Set the description field to the new background field, and add body as a fallback
-    document.getElementById('f_desc').value = data.background || data.body || '';
+    // Set the description field to background only (do NOT populate with raw email body)
+    document.getElementById('f_desc').value = data.background || '';
+
+    // Populate the note field with the email body so it gets saved as an intake note
+    let emailBody = (data.body || '').toString().trim();
+    if (emailBody.startsWith("'")) {
+        emailBody = emailBody.substring(1).trim();
+    }
+    const noteEl = document.getElementById('new-note');
+    if (noteEl) {
+        if (emailBody) {
+            const noteHeader = data.sender ? `📧 INTAKE EMAIL from ${data.sender}:\n` : `📧 INTAKE EMAIL:\n`;
+            noteEl.value = `${noteHeader}${emailBody}`;
+        } else {
+            noteEl.value = '';
+        }
+    }
 
     // --- THIS IS THE KEY FIX ---
     // Populate the new approval fields from their dedicated intake data properties
@@ -8944,6 +8959,57 @@ function addStatusLogEntry() {
             submitBtn.disabled = false;
         }
     });
+}
+
+function deleteStatusLog(index) {
+    showConfirm("Are you sure you want to delete this status update?", "Delete Status Update", () => {
+        const jsonInput = document.getElementById('f_summary_json');
+        if (!jsonInput) return;
+        
+        let logs = [];
+        if (jsonInput.value) {
+            try {
+                logs = JSON.parse(jsonInput.value);
+            } catch (e) {
+                logs = [];
+            }
+        }
+        
+        if (!Array.isArray(logs) || index < 0 || index >= logs.length) return;
+        
+        // Remove entry
+        logs.splice(index, 1);
+        
+        // Update hidden JSON field
+        jsonInput.value = logs.length > 0 ? JSON.stringify(logs) : '';
+        
+        // Update Action Needed / Health indicator to match the latest remaining entry
+        const actionNeededEl = document.getElementById('f_action_needed');
+        let newStatus = 'Not Started';
+        if (logs.length > 0) {
+            newStatus = logs[logs.length - 1].status || 'In Progress';
+        }
+        if (actionNeededEl) {
+            actionNeededEl.value = newStatus;
+        }
+        
+        renderStatusLogTable();
+        
+        // Keep in-memory cache in sync so getFormData won't trigger an unintentional auto-log
+        const id = document.getElementById('f_id') ? document.getElementById('f_id').value : '';
+        if (id && typeof QT1D !== 'undefined' && QT1D.state && QT1D.state.index && QT1D.state.index.has(id)) {
+            const item = QT1D.state.index.get(id);
+            item.StatusSummaryLog = jsonInput.value;
+            item.StatusSummary = newStatus;
+        }
+        
+        // Auto-save the form to persist the deletion, keeping modal open
+        saveForm(false, (success) => {
+            if (success) {
+                showToast("Status update deleted.", "success");
+            }
+        });
+    }, null, "Delete", "danger");
 }
 </script>
 

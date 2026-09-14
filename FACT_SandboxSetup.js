@@ -119,4 +119,14 @@ function setupTriggers_() {
              .create();
     console.log("Trigger for sendInternalDueReminders_ installed successfully.");
   }
+
+  // 3. Process Group Emails (Every 10 minutes)
+  let foundEmails = triggers.find(t => t.getHandlerFunction() === 'processGroupEmails');
+  if (!foundEmails) {
+    ScriptApp.newTrigger('processGroupEmails')
+             .timeBased()
+             .everyMinutes(10)
+             .create();
+    console.log("Trigger for processGroupEmails installed successfully.");
+  }
 }

@@ -148,6 +148,25 @@ function finalizeItem_(form, finalId, isNew, sheetName, changeLog) {
   // Add initial note if provided
   if (isNew && form.InitialNote) {
     addNote(finalId, form.InitialNote);
+  } else if (isNew && form.IntakeRowIndex) {
+    // Fallback: If promoted from intake without form.InitialNote, pull email body from intake row and add as note
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const intakeSheet = ss.getSheetByName('Intake_Queue');
+      const idx = parseInt(form.IntakeRowIndex);
+      if (intakeSheet && !isNaN(idx) && idx > 0) {
+        const intakeRow = intakeSheet.getRange(idx, 1, 1, 9).getValues()[0];
+        let body = (intakeRow[3] || '').toString().trim();
+        const sender = (intakeRow[1] || '').toString().trim();
+        if (body) {
+          if (body.startsWith("'")) body = body.substring(1).trim();
+          const noteHeader = sender ? `📧 INTAKE EMAIL from ${sender}:\n` : `📧 INTAKE EMAIL:\n`;
+          addNote(finalId, `${noteHeader}${body}`);
+        }
+      }
+    } catch (e) {
+      console.error(`Error adding intake body as note: ${e.message}`);
+    }
   }
 
   // Mark intake item as converted

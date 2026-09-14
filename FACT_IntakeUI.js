@@ -9,6 +9,7 @@ function promoteIntake(rowIndex, formObj) {
   // 1. Get Thread ID from Intake row (Col I / Index 9)
   const threadId = sh.getRange(rowIndex, 9).getValue();
   formObj.ThreadID = threadId;
+  formObj.IntakeRowIndex = rowIndex;
 
   // 2. Create the Item (Project or Task)
   const result = saveItem(formObj); // <--- CHANGED: Uses saveItem now
