@@ -25,7 +25,7 @@ function writeItemToSheet_(form, finalId, sheetName, row, isNew, driveLink, fold
         finalId, form.Title, form.Type, form.ParentID, form.Owner,
         form.DueDate, form.Status, form.Desc, form.Complexity, form.Urgency,
         form.ExecStatus, form.ThreadID, driveLink, folderId,
-        form.RecDate, form.IntDue, form.DC_No, form.Requestor, rank,
+        form.RecDate, form.IntDue, form.DC_No || form.DataCallNo || '', form.Requestor, rank,
         form.CompletedDate, form.Archived, form.StatusSummary, form.Assigned,
         form.NotificationSchedule, '',
         form.ApprovalType, form.PriorApprover, form.Background,
@@ -62,7 +62,8 @@ function writeItemToSheet_(form, finalId, sheetName, row, isNew, driveLink, fold
       setVal('FolderID', folderId);
       setVal('RecDate', form.RecDate);
       setVal('IntDue', form.IntDue);
-      setVal('DC_No', form.DC_No);
+      setVal('DC_No', form.DC_No || form.DataCallNo);
+      setVal('DataCallNo', form.DataCallNo || form.DC_No);
       setVal('Requestor', form.Requestor);
       setVal('CompletedDate', form.CompletedDate);
       setVal('Archived', form.Archived);

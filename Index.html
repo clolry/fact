@@ -2816,7 +2816,11 @@ function renderBoard(){
 
           // D. REQUESTOR
           if (QT1D.viewState.req && p.Requestor) {
-             extraHtml += `<div style="font-size:0.7rem; color:#005ea2; margin-top:4px;">👤 Req: ${p.Requestor}</div>`;
+             const reqVal = String(p.Requestor).trim();
+             if (reqVal && isNaN(reqVal)) {
+                const cleanReq = reqVal.replace(/<.*?>/g, '').trim() || reqVal;
+                extraHtml += `<div style="font-size:0.7rem; color:#005ea2; margin-top:4px;">👤 Req: ${cleanReq}</div>`;
+             }
           }
 
           // E. DESCRIPTION
@@ -6723,12 +6727,16 @@ function renderGridBody(items) {
       }
 
       if (gridState.visibleExtra.requestor && item.Requestor) {
-        parts.push(`
-          <span>
-            <span style="font-weight:600; color:var(--sub);">Requestor:</span>
-            ${item.Requestor}
-          </span>
-        `);
+        const reqVal = String(item.Requestor).trim();
+        if (reqVal && isNaN(reqVal)) {
+          const cleanReq = reqVal.replace(/<.*?>/g, '').trim() || reqVal;
+          parts.push(`
+            <span>
+              <span style="font-weight:600; color:var(--sub);">Requestor:</span>
+              ${cleanReq}
+            </span>
+          `);
+        }
       }
 
       if (parts.length > 0) {
@@ -6980,12 +6988,16 @@ function renderGridBodyGrouped(items, groupBy = 'due') {
           }
         }
         if (gridState.visibleExtra.requestor && item.Requestor) {
-          parts.push(`
-            <span>
-              <span style="font-weight:600; color:var(--sub);">Requestor:</span>
-              ${item.Requestor}
-            </span>
-          `);
+          const reqVal = String(item.Requestor).trim();
+          if (reqVal && isNaN(reqVal)) {
+            const cleanReq = reqVal.replace(/<.*?>/g, '').trim() || reqVal;
+            parts.push(`
+              <span>
+                <span style="font-weight:600; color:var(--sub);">Requestor:</span>
+                ${cleanReq}
+              </span>
+            `);
+          }
         }
         if (parts.length > 0) {
           secondLineHtml = `
@@ -8869,13 +8881,45 @@ function renderStatusLogTable() {
         try {
             logs = JSON.parse(jsonStr);
         } catch (e) {
-            // Legacy plain text
-            logs = [{
-                date: new Date().toLocaleDateString(),
-                status: 'In Progress',
-                comment: jsonStr
-            }];
+            const jsonStart = jsonStr.indexOf('[{');
+            if (jsonStart !== -1) {
+                try {
+                    logs = JSON.parse(jsonStr.substring(jsonStart));
+                    const prefix = jsonStr.substring(0, jsonStart).trim();
+                    if (prefix) {
+                        const dateMatch = prefix.match(/^\[(.*?)\]/);
+                        logs.push({
+                            date: dateMatch ? dateMatch[1] : new Date().toLocaleDateString(),
+                            status: document.getElementById('f_action_needed') ? document.getElementById('f_action_needed').value : 'In Progress',
+                            comment: prefix.replace(/^\[.*?\]\s*/, '')
+                        });
+                    }
+                } catch (e2) {
+                    logs = [{
+                        date: new Date().toLocaleDateString(),
+                        status: 'In Progress',
+                        comment: jsonStr
+                    }];
+                }
+            } else {
+                // Legacy plain text
+                logs = [{
+                    date: new Date().toLocaleDateString(),
+                    status: 'In Progress',
+                    comment: jsonStr
+                }];
+            }
         }
+    }
+    
+    // Clean any stray JSON string fragments inside comments if present
+    if (Array.isArray(logs)) {
+        logs.forEach(log => {
+            if (typeof log.comment === 'string' && log.comment.includes('[{')) {
+                const embeddedIdx = log.comment.indexOf('[{');
+                log.comment = log.comment.substring(0, embeddedIdx).trim();
+            }
+        });
     }
     
     if (!Array.isArray(logs) || logs.length === 0) {

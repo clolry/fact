@@ -221,28 +221,28 @@ function getPerformanceReport(startStr, endStr, ownerFilter) {
     const sh = ss.getSheetByName(name);
     if (!sh || sh.getLastRow() < 2) return;
     
-    // Determine column indices based on sheet type
+    const data = sh.getDataRange().getValues();
+    const headers = data[0] || [];
     const isProject = name.includes('Project');
     
-    // --- FIX IS HERE ---
-    // Projects: Done Date is Col AG (Index 32)
-    // Tasks: Done Date is Col S (Index 18) - Was pointing to 16
-    const doneDateIdx = isProject ? 32 : 18; 
-    // -------------------
-
-    const data = sh.getDataRange().getValues();
+    const statusIdx = headers.indexOf('Status') !== -1 ? headers.indexOf('Status') : 6;
+    const ownerIdx = headers.indexOf('Owner') !== -1 ? headers.indexOf('Owner') : (isProject ? 3 : 4);
+    let doneDateIdx = headers.indexOf('CompletedDate');
+    if (doneDateIdx === -1) doneDateIdx = headers.indexOf('Completed_Date');
+    if (doneDateIdx === -1) doneDateIdx = isProject ? 32 : 18;
+    const dueDateIdx = headers.indexOf('DueDate') !== -1 ? headers.indexOf('DueDate') : 5;
     
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      const status = row[6]; // Col G
-      const rowOwner = isProject ? row[3] : row[4]; 
+      const status = row[statusIdx];
+      const rowOwner = row[ownerIdx]; 
       
       if (ownerFilter && rowOwner !== ownerFilter) continue;
       if (status !== 'Done') continue;
 
       let doneDate = row[doneDateIdx];
-      // Fallback: If no "Done Date" recorded, use "Due Date" (Col F / Index 5)
-      if (!doneDate || doneDate === '') doneDate = row[5]; 
+      // Fallback: If no "Done Date" recorded, use "Due Date"
+      if (!doneDate || doneDate === '') doneDate = row[dueDateIdx]; 
       
       let dString = "";
       try {
@@ -282,11 +282,21 @@ function updateCardRank(form) {
   const rank = form.Rank;
   const doneDate = form.CompletedDate;
 
-  const tryUpdate = (sheetName, rankColIdx, dateColIdx) => {
+  const tryUpdate = (sheetName) => {
     const sh = ss.getSheetByName(sheetName);
-    if (!sh) return false;
+    if (!sh || sh.getLastRow() < 2) return false;
     
-    const data = sh.getRange(2, 1, sh.getLastRow()-1, 1).getValues();
+    const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const idColIdx = headers.indexOf('ID') + 1;
+    const statusColIdx = headers.indexOf('Status') + 1;
+    const titleColIdx = headers.indexOf('Title') + 1;
+    const rankColIdx = headers.indexOf('Rank') + 1;
+    let dateColIdx = headers.indexOf('CompletedDate') + 1;
+    if (dateColIdx === 0) dateColIdx = headers.indexOf('Completed_Date') + 1;
+
+    if (idColIdx === 0) return false;
+
+    const data = sh.getRange(2, idColIdx, sh.getLastRow() - 1, 1).getValues();
     let row = -1;
     
     for (let i = 0; i < data.length; i++) {
@@ -297,22 +307,24 @@ function updateCardRank(form) {
     }
 
     if (row > -1) {
-      // 1. GET OLD STATUS FIRST (Critical Fix)
-      const oldStatus = sh.getRange(row, 7).getValue();
-      const title = sh.getRange(row, 2).getValue(); 
+      // 1. GET OLD STATUS FIRST
+      const oldStatus = statusColIdx > 0 ? sh.getRange(row, statusColIdx).getValue() : '';
+      const title = titleColIdx > 0 ? sh.getRange(row, titleColIdx).getValue() : ''; 
       const user = Session.getActiveUser().getEmail();
       
       // 2. LOG IF CHANGED
-      if (oldStatus !== status) {
+      if (oldStatus !== status && statusColIdx > 0) {
           logActivity_(user, id, title, "Moved", `Moved to ${status}`);
           // Update Status Cell
-          sh.getRange(row, 7).setValue(status);
+          sh.getRange(row, statusColIdx).setValue(status);
       }
       
-      // 3. Update Rank
-      sh.getRange(row, rankColIdx).setValue(rank);
+      // 3. Update Rank (uses dynamic rankColIdx so Requestor is never overwritten)
+      if (rankColIdx > 0 && rank !== undefined && rank !== null) {
+          sh.getRange(row, rankColIdx).setValue(rank);
+      }
 
-      // 4. Update Date Done
+      // 4. Update Date Done (uses dynamic dateColIdx)
       if (doneDate && dateColIdx > 0) {
          sh.getRange(row, dateColIdx).setValue(doneDate);
       }
@@ -323,13 +335,11 @@ function updateCardRank(form) {
 
   // Execution Order
   let primarySheet = 'Tasks';
-  let pRank = 18; let pDate = 19; 
+  if (id.startsWith('PROJ')) { primarySheet = 'Projects'; }
+  else if (id.startsWith('SUB')) { primarySheet = 'Sub_Tasks'; }
 
-  if (id.startsWith('PROJ')) { primarySheet = 'Projects'; pRank = 32; pDate = 33; }
-  else if (id.startsWith('SUB')) { primarySheet = 'Sub_Tasks'; pRank = 9; pDate = 0; }
-
-  if (tryUpdate(primarySheet, pRank, pDate)) return;
-  if (primarySheet !== 'Tasks') { if (tryUpdate('Tasks', 18, 19)) return; }
-  if (primarySheet !== 'Projects') { if (tryUpdate('Projects', 32, 33)) return; }
+  if (tryUpdate(primarySheet)) return;
+  if (primarySheet !== 'Tasks') { if (tryUpdate('Tasks')) return; }
+  if (primarySheet !== 'Projects') { if (tryUpdate('Projects')) return; }
 }
 

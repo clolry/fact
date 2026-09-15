@@ -801,6 +801,34 @@ function getGuestActionData() {
 
       const guestVisibleNotes = getGuestNotes_(item.ID);
 
+      let latestComment = '';
+      if (item.StatusSummaryLog) {
+        try {
+          const jsonStart = item.StatusSummaryLog.indexOf('[{');
+          if (jsonStart !== -1) {
+            const parsed = JSON.parse(item.StatusSummaryLog.substring(jsonStart));
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              latestComment = parsed[parsed.length - 1].comment || '';
+            }
+          } else {
+            latestComment = item.StatusSummaryLog;
+          }
+        } catch(e) {
+          latestComment = item.StatusSummaryLog;
+        }
+      }
+
+      let displaySummary = item.StatusSummary || '';
+      if (latestComment) {
+        if (item.StatusSummary && !latestComment.startsWith(`[${item.StatusSummary}]`)) {
+          displaySummary = `[${item.StatusSummary}] ${latestComment}`;
+        } else {
+          displaySummary = latestComment;
+        }
+      } else if (!displaySummary) {
+        displaySummary = 'No summary provided.';
+      }
+
       userActions.push({
         id: item.ID,
         title: item.Title,
@@ -813,7 +841,8 @@ function getGuestActionData() {
         dueDate: item.DueDate
           ? new Date(item.DueDate).toLocaleDateString('en-US', { timeZone: 'UTC' })
           : 'N/A',
-        statusSummary: item.StatusSummary || 'No summary provided.',
+        statusSummary: displaySummary,
+        healthStatus: item.StatusSummary || 'In Progress',
         driveLink: item.DriveLink || '',
         notes: guestVisibleNotes
       });
@@ -1032,7 +1061,7 @@ function addOrUpdateStakeholder(personInfo) {
  * @param {string} commentText The text of the comment.
  * @returns {object} A success or error message.
  */
-function addGuestComment(itemId, commentText) {
+function addGuestComment(itemId, commentText, healthStatus = 'In Progress') {
   if (!itemId || !commentText || commentText.trim() === '') {
     throw new Error("Invalid input. Comment text cannot be empty.");
   }
@@ -1040,16 +1069,22 @@ function addGuestComment(itemId, commentText) {
   try {
     const userEmail = Session.getActiveUser().getEmail().toLowerCase().trim();
     const { emailToName, nameToEmail } = buildStakeholderMap_();
-    const userDisplayName = emailToName.get(userEmail) || userEmail;
+    
+    // Resolve display name with proper casing
+    let displayName = emailToName.get(userEmail);
+    if (!displayName && userEmail.includes('@')) {
+      displayName = userEmail.split('@')[0].split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    }
+    if (!displayName) displayName = userEmail;
 
     // Fetch the item
     const item = getProjectsData_(true).projects.find(p => p.ID === itemId);
     if (!item) throw new Error("Item not found.");
 
-    // Security check using the same exact matching logic
+    // Security check using lowercase for matching
     const hasAccess = isUserOnCard_(
       userEmail,
-      userDisplayName.toLowerCase(),
+      displayName.toLowerCase(),
       nameToEmail,
       item.Owner,
       item.Requestor,
@@ -1062,14 +1097,53 @@ function addGuestComment(itemId, commentText) {
     }
 
     // Format and save the note
-    const displayName = emailToName.get(userEmail) || userEmail;
     const note = `[GUEST COMMENT by ${displayName}]:\n${commentText}`;
     addNote(itemId, note, displayName);
 
-    // Update Status Summary
-    const today = new Date().toLocaleDateString();
-    const newSummaryText = `Guest Comment by ${displayName}: ${commentText}`;
-    const logEntry = `[${today}] ${newSummaryText}\n${item.StatusSummaryLog || item.StatusSummary || ''}`;
+    // Update Status Summary & StatusSummaryLog
+    const now = new Date();
+    const timestamp = now.toLocaleDateString() + ' ' + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const effectiveHealth = healthStatus || item.StatusSummary || 'In Progress';
+    const cleanComment = `Guest Comment by ${displayName}: ${commentText}`;
+
+    // Parse existing StatusSummaryLog JSON cleanly
+    let logs = [];
+    if (item.StatusSummaryLog) {
+      try {
+        logs = JSON.parse(item.StatusSummaryLog);
+      } catch (e) {
+        const jsonStart = item.StatusSummaryLog.indexOf('[{');
+        if (jsonStart !== -1) {
+          try {
+            logs = JSON.parse(item.StatusSummaryLog.substring(jsonStart));
+            const prefix = item.StatusSummaryLog.substring(0, jsonStart).trim();
+            if (prefix) {
+              logs.unshift({
+                date: prefix.match(/^\[(.*?)\]/)?.[1] || now.toLocaleDateString(),
+                status: item.StatusSummary || 'In Progress',
+                comment: prefix.replace(/^\[.*?\]\s*/, '')
+              });
+            }
+          } catch(e2) {}
+        } else {
+          logs = [{
+            date: now.toLocaleDateString(),
+            status: item.StatusSummary || 'In Progress',
+            comment: item.StatusSummaryLog
+          }];
+        }
+      }
+    }
+    if (!Array.isArray(logs)) logs = [];
+
+    // Append new status log entry
+    logs.push({
+      date: timestamp,
+      status: effectiveHealth,
+      comment: cleanComment
+    });
+
+    const newLogJson = JSON.stringify(logs);
     
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheets = ['Tasks', 'Projects', 'Sub_Tasks'];
@@ -1084,8 +1158,8 @@ function addGuestComment(itemId, commentText) {
       let found = false;
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][0]) === String(itemId)) {
-          if (sumCol > 0) sh.getRange(i + 1, sumCol).setValue(newSummaryText);
-          if (logCol > 0) sh.getRange(i + 1, logCol).setValue(logEntry);
+          if (sumCol > 0) sh.getRange(i + 1, sumCol).setValue(effectiveHealth);
+          if (logCol > 0) sh.getRange(i + 1, logCol).setValue(newLogJson);
           found = true;
           break;
         }
@@ -1111,7 +1185,11 @@ function addGuestComment(itemId, commentText) {
       }
     }
 
-    return { success: true, message: "Comment added successfully." };
+    return { 
+      success: true, 
+      message: "Comment added successfully.",
+      statusSummary: `[${effectiveHealth}] ${cleanComment}`
+    };
 
   } catch (e) {
     console.error(`Error in addGuestComment: ${e.message}`);
@@ -1300,11 +1378,12 @@ function buildStakeholderMap_() {
 
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
   data.forEach(row => {
-    const name = (row[0] || '').toString().trim().toLowerCase();
+    const originalName = (row[0] || '').toString().trim();
     const email = (row[1] || '').toString().trim().toLowerCase();
-    if (name && email) {
-      emailToName.set(email, name);
-      nameToEmail.set(name, email);
+    if (originalName && email) {
+      emailToName.set(email, originalName);
+      nameToEmail.set(originalName.toLowerCase(), email);
+      nameToEmail.set(originalName, email);
     }
   });
 
