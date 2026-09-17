@@ -628,7 +628,9 @@ function sendWorkflowCompletionNotification_(itemId, itemTitle, owners, primaryD
     }
     
     // Chat webhook integration
-    const webhookUrl = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK');
+    const webhookUrl = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK')
+      || PropertiesService.getScriptProperties().getProperty('NOTIFICATION_CHAT_WEBHOOK')
+      || PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL');
     if (webhookUrl && webhookUrl.trim() !== '') {
         const chatPayload = { "text": `✅ *Workflow Fully Approved*\n*Item:* ${itemId} - ${itemTitle}\n*Link:* ${appUrl}` };
         UrlFetchApp.fetch(webhookUrl, { method: 'post', contentType: 'application/json', payload: JSON.stringify(chatPayload), muteHttpExceptions: true });
@@ -646,7 +648,9 @@ function sendWorkflowCompletionNotification_(itemId, itemTitle, owners, primaryD
  */
 function sendChatNotification_(message) {
   try {
-    const webhookUrl = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL');
+    const webhookUrl = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK')
+      || PropertiesService.getScriptProperties().getProperty('NOTIFICATION_CHAT_WEBHOOK')
+      || PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL');
     if (!webhookUrl) {
       console.warn("Chat webhook URL is not configured. Skipping chat notification.");
       return;
