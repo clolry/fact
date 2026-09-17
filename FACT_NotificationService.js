@@ -753,9 +753,19 @@ function sendMaskedEmail_(options) {
     delete advancedOptions.subject;
     delete advancedOptions.body;
     
-    // Force all system emails to come from noreply@gsa.gov
+    // Force all system emails to come from noreply
     advancedOptions.noReply = true;
     advancedOptions.name = advancedOptions.name || 'FACT System';
+    
+    // Ensure replies route back to the group email so processGroupEmails can capture them
+    if (!advancedOptions.replyTo) {
+        try {
+            const config = loadConfig_();
+            if (config.groupEmail) {
+                advancedOptions.replyTo = config.groupEmail.split(',')[0].trim();
+            }
+        } catch(e) {}
+    }
     
     try {
         GmailApp.sendEmail(to, subject, plainBody, advancedOptions);
