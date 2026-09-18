@@ -773,3 +773,152 @@ function sendMaskedEmail_(options) {
         console.error("sendMaskedEmail_ failed: " + e.message);
     }
 }
+
+/**
+ * Sends a direct, private status update request email to the item's owner.
+ * Does not post publicly to group chat or copy the whole team, avoiding embarrassment.
+ * Also logs an audit note in the item's history.
+ * 
+ * @param {string} itemId The item ID (e.g., TASK-1001 or PROJ-2001)
+ * @param {string} [customMessage] Optional note from the requester
+ * @returns {object} { success: boolean, message: string }
+ */
+function pingOwnerForUpdate(itemId, customMessage) {
+  try {
+    if (!itemId) throw new Error("Item ID is required.");
+    
+    const item = getItemDetails(itemId);
+    if (!item || !item.ID) {
+      throw new Error("Item " + itemId + " not found.");
+    }
+    
+    const rawOwner = item.Owner || '';
+    if (!rawOwner) {
+      return { success: false, message: "This item does not currently have an assigned owner." };
+    }
+    
+    // Resolve owner's email address
+    let ownerEmail = '';
+    const emailMatch = rawOwner.match(/<([^>]+@[^>]+)>/) || rawOwner.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    if (emailMatch) {
+      ownerEmail = emailMatch[1].trim().toLowerCase();
+    } else {
+      const resolved = resolveRecipientEmails_([rawOwner]);
+      if (resolved && resolved.length > 0) {
+        ownerEmail = resolved[0].toLowerCase();
+      }
+    }
+    
+    if (!ownerEmail) {
+      return { success: false, message: "Could not resolve an email address for owner: " + rawOwner };
+    }
+    
+    const requesterEmail = Session.getActiveUser().getEmail() || '';
+    const requesterName = requesterEmail ? requesterEmail.split('@')[0].replace('.', ' ') : 'A team member';
+    const cleanRequesterName = requesterName.charAt(0).toUpperCase() + requesterName.slice(1);
+    
+    const baseUrl = ScriptApp.getService().getUrl();
+    const boardUrl = baseUrl + '?id=' + encodeURIComponent(item.ID);
+    const guestUrl = baseUrl + '?page=guestportal&id=' + encodeURIComponent(item.ID);
+    
+    const subject = `[Status Update Requested] ${item.ID}: ${item.Title || 'Action Item'}`;
+    
+    const customNoteHtml = customMessage ? `
+      <div style="margin: 16px 0; padding: 12px 16px; background-color: #f1f3f4; border-left: 4px solid #1a73e8; border-radius: 4px;">
+        <strong style="color: #202124;">Message from ${escapeNotificationHtml_(cleanRequesterName)}:</strong>
+        <p style="margin: 6px 0 0 0; color: #3c4043; font-style: italic;">"${escapeNotificationHtml_(customMessage)}"</p>
+      </div>
+    ` : '';
+    
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; color: #202124; max-width: 600px; line-height: 1.5; margin: 0 auto; border: 1px solid #dadce0; border-radius: 8px; padding: 24px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+          <h2 style="color: #1a73e8; margin: 0; font-size: 20px;">📧 Status Update Requested</h2>
+        </div>
+        <p style="font-size: 15px; margin-bottom: 12px;">Hello,</p>
+        <p style="font-size: 14px; margin-bottom: 16px;">
+          <strong>${escapeNotificationHtml_(cleanRequesterName)}</strong> ${requesterEmail ? '(' + escapeNotificationHtml_(requesterEmail) + ')' : ''} is requesting a status update on the following item assigned to you:
+        </p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; width: 120px; border-bottom: 1px solid #e0e0e0;">Item ID:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;"><strong>${escapeNotificationHtml_(item.ID)}</strong></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Title:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;">${escapeNotificationHtml_(item.Title || '')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Status:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;"><span style="display: inline-block; padding: 2px 8px; background: #e8f0fe; color: #1a73e8; border-radius: 4px; font-weight: bold; font-size: 12px;">${escapeNotificationHtml_(item.Status || 'In Progress')}</span></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Due Date:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;">${escapeNotificationHtml_(item.DueDate || 'Not set')}</td>
+          </tr>
+        </table>
+        
+        ${customNoteHtml}
+        
+        <p style="font-size: 14px; margin-bottom: 20px;">
+          Please provide a quick update or adjust the status and notes at your earliest convenience:
+        </p>
+        
+        <div style="margin-bottom: 24px; text-align: center;">
+          <a href="${boardUrl}" style="display: inline-block; background-color: #1a73e8; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; margin-right: 10px;">
+            Open in Kanban Board
+          </a>
+          <a href="${guestUrl}" style="display: inline-block; background-color: #5f6368; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">
+            Open in Guest Portal
+          </a>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #dadce0; margin: 24px 0 16px 0;">
+        <p style="font-size: 12px; color: #70757a; margin: 0;">
+          💡 You can also reply directly to this email to respond to ${escapeNotificationHtml_(requesterEmail || 'the team')}.
+        </p>
+      </div>
+    `;
+    
+    sendMaskedEmail_({
+      to: ownerEmail,
+      subject: subject,
+      htmlBody: htmlBody,
+      replyTo: requesterEmail || undefined
+    });
+    
+    // Log note to item history
+    const logText = `📧 Status update request email sent to owner (${ownerEmail}) by ${requesterEmail || 'System'}${customMessage ? ': "' + customMessage + '"' : ''}`;
+    try {
+      addNote(itemId, logText, 'System.Ping', item.Title);
+    } catch(noteErr) {
+      console.warn("Could not record ping audit note: " + noteErr.message);
+    }
+    
+    return {
+      success: true,
+      message: `Status update request email sent to ${ownerEmail}.`
+    };
+  } catch (err) {
+    console.error("pingOwnerForUpdate error: " + err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
+}
+
+/**
+ * Escapes characters for safe HTML email rendering.
+ * @private
+ */
+function escapeNotificationHtml_(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
