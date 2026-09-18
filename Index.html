@@ -998,21 +998,38 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
     transform: scale(0.98);
 }
 .card-link-btn {
-    margin-left: auto;
-    background: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
     border: none;
     cursor: pointer;
-    font-size: 0.82rem;
-    padding: 2px 4px;
-    opacity: 0.6;
-    transition: opacity 0.2s, transform 0.15s;
+    padding: 3px 4px;
+    color: var(--text-sub, #5f6368);
+    opacity: 0.65;
+    transition: all 0.15s ease;
     border-radius: 4px;
     line-height: 1;
 }
 .card-link-btn:hover {
     opacity: 1;
+    color: var(--accent, #1a73e8);
+    background: rgba(26, 115, 232, 0.1);
     transform: scale(1.1);
-    background: rgba(0,0,0,0.05);
+}
+.card-attach-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.82rem;
+    line-height: 1;
+    padding: 2px;
+    border-radius: 3px;
+    cursor: help;
+    opacity: 0.85;
+    transition: opacity 0.15s ease;
+}
+.card-attach-badge:hover {
+    opacity: 1;
 }
 /* Toast Notifications */
 #fact-toast-container {
@@ -2118,6 +2135,17 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
                <textarea id="f_drive" rows="3" placeholder="Paste links here (one per line)..." oninput="renderLinkPreview()" style="font-family:monospace; font-size:0.85rem;"></textarea>
                <div id="link-preview" class="link-preview"></div>
             </div>
+
+            <div class="full-width" style="margin-bottom:15px; display:flex; flex-direction:column;">
+               <label style="display:flex; justify-content:space-between; align-items:center;">
+                 <span>Originator Source Files / Folder Link (to Clone into System Folder) 📥</span>
+                 <span id="source-drive-detected-badge" style="display:none; font-size:0.75rem; background:#e6f4ea; color:#137333; padding:2px 8px; border-radius:12px; font-weight:bold;">Auto-detected from Email</span>
+               </label>
+               <input type="text" id="f_source_drive_link" placeholder="Paste originator's Google Drive folder or file link here to clone files..." style="font-family:monospace; font-size:0.85rem;">
+               <span style="font-size:0.75rem; color:#5f6368; margin-top:3px;">
+                 All files in this folder will be copied into our system folder, making our team the owner and granting Editor access to all assignees.
+               </span>
+            </div>
             
             <div class="full-width" style="margin-bottom:15px; display:flex; flex-direction:column;">
                 <label>Description</label>
@@ -2414,6 +2442,51 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
   </div>
 </div>
 
+  <div id="delegation-email-modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:2500; justify-content:center; align-items:center;">
+    <div class="modal" style="width:640px; max-width:95%; height:auto; max-height:85vh; display:flex; flex-direction:column; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.35);">
+      <div class="modal-header" style="border-bottom:1px solid var(--border); padding:16px 20px; display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:1.15rem; display:flex; align-items:center; gap:8px;">
+          <span>⚡</span> Delegated Task Assignment Email
+        </h3>
+        <button onclick="closeDelegationModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;" title="Close">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:20px; overflow-y:auto; flex:1;">
+        <p style="color:var(--text-sub, #5f6368); font-size:0.85rem; margin-top:0; margin-bottom:15px; line-height:1.4;">
+          This item has been saved as <strong>Delegated</strong>. The system has drafted an assignment email below. Customize the recipients and instructions before sending, or click "Skip Email".
+        </p>
+        <input type="hidden" id="del_item_id">
+        
+        <div style="margin-bottom:14px;">
+          <label style="font-weight:600; font-size:0.85rem; display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span>Recipients (To):</span>
+            <span style="font-weight:normal; font-size:0.75rem; color:#666;">Defaults to Assigned Team</span>
+          </label>
+          <input type="text" id="del_recipients" class="multi-autocomplete" placeholder="Type name or email to search directory..." style="width:100%; font-size:0.9rem;">
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;">Subject:</label>
+          <input type="text" id="del_subject" style="width:100%; font-size:0.9rem; font-weight:600;">
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;">Delegation Instructions / Notes:</label>
+          <textarea id="del_body" rows="7" style="width:100%; font-size:0.9rem; line-height:1.4; resize:vertical;"></textarea>
+        </div>
+
+        <div id="del_drive_notice" style="background:#e8f0fe; border-left:4px solid #1a73e8; padding:10px 14px; border-radius:4px; font-size:0.82rem; color:#1967d2;">
+          📁 Cloned Drive Folder and Guest Portal deep links will be automatically included in this email.
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--border); padding:14px 20px; display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn" onclick="closeDelegationModal()" style="font-size:0.85rem;">Skip Email (Save Only)</button>
+        <button type="button" class="btn-primary" id="btn-send-delegation" onclick="sendDelegationEmail()" style="display:inline-flex; align-items:center; gap:6px; font-size:0.9rem; padding:8px 18px;">
+          <span>📧</span> Send Delegation Email
+        </button>
+      </div>
+    </div>
+  </div>
+
   <button class="fab" onclick="openForm()" title="Create New Item">+</button>
   
 <?!= include('Lib_Chart'); ?>
@@ -2478,12 +2551,13 @@ window.QT1D = {
     }
   }
 
-  function getItemDeepLink(itemId, forGuest) {
+  function getItemDeepLink(itemId, forGuest, tab) {
     const base = (typeof FACT_APP_URL !== 'undefined' && FACT_APP_URL) ? FACT_APP_URL : (window.location.origin + window.location.pathname);
     if (forGuest) {
       return `${base}?page=guestportal&id=${encodeURIComponent(itemId)}`;
     }
-    return `${base}?id=${encodeURIComponent(itemId)}`;
+    const tabParam = (tab && tab !== 'details') ? `&tab=${encodeURIComponent(tab)}` : '';
+    return `${base}?id=${encodeURIComponent(itemId)}${tabParam}`;
   }
 
   function copyItemDeepLink() {
@@ -2492,7 +2566,9 @@ window.QT1D = {
       showToast('No active item to copy link for.', 'warning');
       return;
     }
-    const url = getItemDeepLink(id);
+    const activeTabElem = document.querySelector('#modal-tabs .tab.active');
+    const activeTab = activeTabElem ? (activeTabElem.getAttribute('data-target') || 'details') : 'details';
+    const url = getItemDeepLink(id, false, activeTab);
     copyTextToClipboard(url).then(() => {
       showToast(`🔗 Link copied to clipboard for ${id}`, 'success');
     }).catch(() => {
@@ -2578,6 +2654,90 @@ window.QT1D = {
     );
   }
 
+  function openDelegationModal(itemId, formData, folderUrl, copiedCount) {
+    if (!itemId) return;
+    document.getElementById('del_item_id').value = itemId;
+    
+    // 1. Resolve recipients: default to formData.Assigned, plus Owner if not already in Assigned
+    let recipientsList = [];
+    if (formData.Assigned) {
+        recipientsList.push(formData.Assigned.trim());
+    }
+    if (formData.Owner && !recipientsList.some(r => r.toLowerCase().includes(formData.Owner.toLowerCase()))) {
+        recipientsList.push(formData.Owner.trim());
+    }
+    document.getElementById('del_recipients').value = recipientsList.join(', ');
+    
+    // 2. Set Subject
+    document.getElementById('del_subject').value = `[Delegated Task Assignment] ${itemId}: ${formData.Title || 'Action Item'}`;
+    
+    // 3. Draft Instructions / Body
+    let draftMsg = `Hello,\n\nThe following action item has been delegated to your team for action and response:\n\n`;
+    if (formData.Desc) {
+        draftMsg += `Background / Instructions:\n${formData.Desc}\n\n`;
+    } else {
+        draftMsg += `Please review the task materials in the linked system Drive folder and provide status updates and responses.\n\n`;
+    }
+    
+    if (copiedCount && copiedCount > 0) {
+        draftMsg += `Note: ${copiedCount} file(s) from the originator's shared folder have been cloned into our item Drive folder, and editor access has been provisioned to you.\n\n`;
+    }
+    
+    draftMsg += `Please post regular updates or questions directly on the card or in the status portal.`;
+    document.getElementById('del_body').value = draftMsg;
+    
+    // 4. Update drive notice if folder exists
+    const noticeEl = document.getElementById('del_drive_notice');
+    if (folderUrl) {
+        noticeEl.innerHTML = `📁 <strong>Cloned Drive Folder:</strong> All originator files have been cloned into the system folder for this task. Direct link will be included in the email.`;
+    }
+    
+    // 5. Show modal
+    document.getElementById('delegation-email-modal-overlay').style.display = 'flex';
+    if (typeof initializeAutocomplete === 'function') {
+        initializeAutocomplete();
+    }
+  }
+
+  function closeDelegationModal() {
+    document.getElementById('delegation-email-modal-overlay').style.display = 'none';
+  }
+
+  function sendDelegationEmail() {
+    const itemId = document.getElementById('del_item_id').value;
+    const recipients = document.getElementById('del_recipients').value.trim();
+    const subject = document.getElementById('del_subject').value.trim();
+    const body = document.getElementById('del_body').value.trim();
+    
+    if (!recipients) {
+        showAlert("Please specify at least one recipient email.", "Recipient Required", "warning");
+        return;
+    }
+    
+    const btn = document.getElementById('btn-send-delegation');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳</span> Sending...';
+    
+    google.script.run
+        .withSuccessHandler(function(res) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            if (res && res.success) {
+                closeDelegationModal();
+                showToast(`📧 ${res.message}`, 'success');
+            } else {
+                showAlert(res ? res.message : 'Could not send delegation email.', 'Error', 'error');
+            }
+        })
+        .withFailureHandler(function(err) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            showAlert('Server Error: ' + err.message, 'Error', 'error');
+        })
+        .sendDelegationAssignmentEmail(itemId, recipients, subject, body);
+  }
+
   function switchTab(tabName){
     document.querySelectorAll('.tab').forEach(e => e.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(e => e.style.display = 'none');
@@ -2587,8 +2747,9 @@ window.QT1D = {
 
   window.onload = () => { 
       if(localStorage.getItem('dark')==='1') toggleDark(); 
-      const requestedTask = "<?= requestedTask || '' ?>";
-      window.userAccessLevel = "<?= accessLevel || '' ?>";
+      const requestedTask = "<?= requestedTask ?>".trim();
+      const requestedTab = "<?= requestedTab ?>".trim();
+      window.userAccessLevel = "<?= accessLevel ?>";
       
       try {
           // Use string replacement to avoid parsing errors with unescaped quotes if any
@@ -2600,8 +2761,8 @@ window.QT1D = {
       applySidebarConfig();
       
       boot(() => {
-          if (requestedTask) {
-              openForm(requestedTask, 'approvals');
+          if (requestedTask && requestedTask !== 'null' && requestedTask !== 'undefined' && requestedTask !== '(?:)' && !requestedTask.includes('?')) {
+              openForm(requestedTask, requestedTab || 'details');
           }
       }); 
   };
@@ -2948,7 +3109,7 @@ function renderBoard(){
               else if (diffDays >= 0 && diffDays <= 3) colorClass = 'status-soon'; 
           }
 
-          const clipIcon = p.DriveLink ? `<span style="margin-left:auto; cursor:help;" title="Has Attachments">📎</span>` : '';
+          const attachBadge = p.DriveLink ? `<span class="card-attach-badge" title="Has attached files / Drive folder">📁</span>` : '';
           let displayStatus = p.ExecStatus;
           if (displayStatus === 'Approved') displayStatus = 'Approval Complete';
           const execBadge = p.ExecStatus ? `<div class="exec-flag ${p.ExecStatus === 'Approved' ? 'approved-flag' : ''}" onclick="event.stopPropagation(); openForm('${p.ID}', 'approvals')" style="cursor:pointer; ${p.ExecStatus === 'Approved' ? 'background:#e6f4ea; color:#137333; border-color:#ceead6;' : ''}" title="Click to view Routing Status">${p.ExecStatus === 'Approved' ? '✅' : '🚩'} ${displayStatus}</div>` : "";
@@ -3030,8 +3191,12 @@ function renderBoard(){
              <div class="card-header" style="display:flex; align-items:center; margin-bottom:6px;">
                 <span class="tag" style="font-weight:bold; color:#1a73e8; font-size:0.75rem;">${p.Type||'Task'}</span>
                 ${p.Urgency==='Critical' ? '<span style="margin-left:5px;">🔥</span>' : ''}
-                ${clipIcon}
-                <button type="button" class="card-link-btn" onclick="event.stopPropagation(); copyDirectCardLink('${p.ID}')" title="Copy direct link to card">🔗</button>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:5px;">
+                   ${attachBadge}
+                   <button type="button" class="card-link-btn" onclick="event.stopPropagation(); copyDirectCardLink('${p.ID}')" title="Copy direct link to card">
+                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                   </button>
+                </div>
              </div>
              <div class="card-title">${p.Title}</div>
              <div style="font-size:0.8rem; color:#555; margin-bottom:4px;">${p.Owner||'Unassigned'}</div>
@@ -3477,7 +3642,7 @@ function enableWeeklyReview() {
                     // Continue opening the form now that we have fresh data
                     _openFormWithData(finalId, targetTab);
                 } else {
-                    showAlert("Item details could not be found.", "Error", "error");
+                    showAlert(`Item details could not be found for ID: ${cleanId}`, "Error", "error");
                 }
             })
             .withFailureHandler(err => {
@@ -3551,6 +3716,8 @@ function enableWeeklyReview() {
 
     document.getElementById('link-preview').innerHTML = ''; 
     document.getElementById('f_drive').value = ''; 
+    if (document.getElementById('f_source_drive_link')) document.getElementById('f_source_drive_link').value = '';
+    if (document.getElementById('source-drive-detected-badge')) document.getElementById('source-drive-detected-badge').style.display = 'none';
     document.getElementById('st-list').innerHTML = '';
     document.getElementById('note-log').innerHTML = 'Loading notes...';
     
@@ -3823,6 +3990,8 @@ function enableWeeklyReview() {
       if(document.getElementById('f_summary')) document.getElementById('f_summary').value = '';
       if(document.getElementById('summary-log')) document.getElementById('summary-log').textContent = '';
       document.getElementById('f_primary_doc').value = '';
+      if (document.getElementById('f_source_drive_link')) document.getElementById('f_source_drive_link').value = '';
+      if (document.getElementById('source-drive-detected-badge')) document.getElementById('source-drive-detected-badge').style.display = 'none';
       if(document.getElementById('f_workflow_json')) document.getElementById('f_workflow_json').value = '';
       if(document.getElementById('f_summary_json')) document.getElementById('f_summary_json').value = '';
       if(document.getElementById('f_action_needed')) document.getElementById('f_action_needed').value = 'Not Started';
@@ -3873,6 +4042,7 @@ function getFormData() {
         Complexity: document.getElementById('f_complex').value,
         Urgency: document.getElementById('f_urgency').value,
         DriveLink: document.getElementById('f_drive').value,
+        SourceDriveLink: document.getElementById('f_source_drive_link') ? document.getElementById('f_source_drive_link').value.trim() : '',
         DataCallNo: document.getElementById('f_dc_no').value,
         Requestor: document.getElementById('f_requestor').value,
         RecDate: document.getElementById('f_rec_date').value,
@@ -4081,6 +4251,9 @@ function saveForm(closeModalAfter = true, callback = null) {
             if (res.id) {
                 document.getElementById('f_id').value = res.id;
             }
+            if (res.copiedFilesCount > 0) {
+                showToast(`📁 Cloned ${res.copiedFilesCount} file(s) into item folder`, 'success');
+            }
             if (closeModalAfter) {
                 closeForm();
                 btn.textContent = originalText; 
@@ -4108,6 +4281,10 @@ function saveForm(closeModalAfter = true, callback = null) {
             refreshBoardData();
             if(document.getElementById('timeline-view').style.display === 'block') {
                  loadTimeline();
+            }
+            // If the item is marked as Delegated, launch the interactive delegation assignment email composer
+            if (formData.Status === 'Delegated') {
+                openDelegationModal(res.id || formData.ID, formData, res.driveLink, res.copiedFilesCount);
             }
         } else {
             showAlert("Error saving: " + res.error, "Save Error", "error");
@@ -4537,6 +4714,21 @@ function reviewIntake(idx) {
     }
     document.getElementById('f_prior_approver').value = data.priorApprover || '';
     document.getElementById('f_background').value = data.background || '';
+
+    // Auto-detect Google Drive folder or file link from intake email body
+    const bodyText = (data.body || '').toString();
+    const driveFolderMatch = bodyText.match(/https?:\/\/(?:drive|docs)\.google\.com\/[^\s>"\)]+/i);
+    const sourceDriveEl = document.getElementById('f_source_drive_link');
+    const badgeEl = document.getElementById('source-drive-detected-badge');
+    if (sourceDriveEl) {
+        if (driveFolderMatch) {
+            sourceDriveEl.value = driveFolderMatch[0].trim();
+            if (badgeEl) badgeEl.style.display = 'inline-block';
+        } else {
+            sourceDriveEl.value = '';
+            if (badgeEl) badgeEl.style.display = 'none';
+        }
+    }
 }
 
   function loadDailyCheckin(){
@@ -5506,7 +5698,9 @@ function exportBoard() {
 
      // 1. Fill Form Dropdowns
      fill('f_type', conf.types);
-     fill('f_status', conf.stages);
+     const stages = (conf.stages || []).slice();
+     if (!stages.includes('Delegated')) stages.push('Delegated');
+     fill('f_status', stages);
      
      
      // 3. Fill Header Exec Filter

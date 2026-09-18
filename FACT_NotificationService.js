@@ -306,7 +306,7 @@ function sendDeclineNotification_(itemId, itemTitle, declinedBy, notes, steps, p
     
     const subject = `Routing Declined: ${itemId} - ${itemTitle}`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -347,7 +347,7 @@ function sendReturnNotification_(itemId, itemTitle, returnedBy, notes, steps, pr
     
     const subject = `Routing Returned for Revision: ${itemId} - ${itemTitle}`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -385,7 +385,7 @@ function sendUnifiedWorkflowStartNotification_(itemId, itemTitle, workflowSteps,
     if (!allStakeholders || allStakeholders.length === 0) return;
     
     const subject = `${itemTitle} Approval Routing`;
-    const appUrl = ScriptApp.getService().getUrl() + '?id=' + itemId;
+    const appUrl = ScriptApp.getService().getUrl() + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     const timelineHtml = generateRoutingTimelineHtml_(workflowSteps);
     
     let docUrl = primaryDocUrl;
@@ -456,7 +456,7 @@ function sendApprovalActionEmail_(itemId, itemTitle, stepObj, approvers, primary
       ? `${prefix}FYI / Awareness: ${itemId} Approval Routing (${stepObj.role})`
       : `${prefix}Action Required: ${itemId} Approval (${stepObj.role})`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -581,7 +581,7 @@ function sendWorkflowCompletionNotification_(itemId, itemTitle, owners, primaryD
     
     const subject = `✅ Approval Complete: ${itemId} - ${itemTitle}`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -921,4 +921,148 @@ function escapeNotificationHtml_(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/**
+ * Sends an interactive delegation assignment email to the assigned team/owners.
+ * Formats clean HTML email with task summary, instructions, cloned Drive folder link,
+ * and 1-click web app & guest portal deep links.
+ * Also records an audit log entry on the item.
+ * 
+ * @param {string} itemId The item ID (e.g., TASK-1001)
+ * @param {string|string[]} recipients Comma-separated or array of recipient email addresses
+ * @param {string} subject Email subject line
+ * @param {string} body Plain text or HTML message body / instructions
+ * @returns {{success: boolean, message: string}}
+ */
+function sendDelegationAssignmentEmail(itemId, recipients, subject, body) {
+  try {
+    if (!itemId) throw new Error("Item ID is required.");
+    
+    const item = getItemDetails(itemId);
+    if (!item || !item.ID) {
+      throw new Error("Item " + itemId + " not found.");
+    }
+    
+    // Resolve recipients
+    let recipientList = [];
+    if (Array.isArray(recipients)) {
+      recipientList = recipients;
+    } else if (typeof recipients === 'string') {
+      recipientList = recipients.split(/[\r\n,]+/).map(r => r.trim()).filter(Boolean);
+    }
+    
+    const resolvedEmails = resolveRecipientEmails_(recipientList);
+    if (resolvedEmails.length === 0) {
+      return { success: false, message: "No valid recipient email addresses provided." };
+    }
+    
+    const currentUser = Session.getActiveUser().getEmail() || '';
+    const senderName = currentUser ? currentUser.split('@')[0].replace('.', ' ') : 'Leadership';
+    const cleanSenderName = senderName.charAt(0).toUpperCase() + senderName.slice(1);
+    
+    const baseUrl = ScriptApp.getService().getUrl();
+    const boardUrl = baseUrl + '?id=' + encodeURIComponent(item.ID);
+    const guestUrl = baseUrl + '?page=guestportal&id=' + encodeURIComponent(item.ID);
+    const driveFolderUrl = item.DriveLink ? item.DriveLink.split('\n')[0].trim() : '';
+    
+    const finalSubject = subject || `[Delegated Task Assignment] ${item.ID}: ${item.Title || 'Action Item'}`;
+    
+    const bodyFormatted = (body || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
+    
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; color: #202124; max-width: 650px; line-height: 1.5; margin: 0 auto; border: 1px solid #dadce0; border-radius: 8px; padding: 24px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+          <h2 style="color: #1a73e8; margin: 0; font-size: 20px;">⚡ Delegated Task Assignment</h2>
+        </div>
+        
+        <p style="font-size: 14px; margin-bottom: 16px;">
+          <strong>${escapeNotificationHtml_(cleanSenderName)}</strong> ${currentUser ? '(' + escapeNotificationHtml_(currentUser) + ')' : ''} has delegated the following action item to your team:
+        </p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; width: 130px; border-bottom: 1px solid #e0e0e0;">Item ID:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;"><strong>${escapeNotificationHtml_(item.ID)}</strong></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Title:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;">${escapeNotificationHtml_(item.Title || '')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Urgency:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;">${escapeNotificationHtml_(item.Urgency || 'Medium')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Due Date:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;">${escapeNotificationHtml_(item.DueDate || 'Not set')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background-color: #f8f9fa; font-weight: bold; border-bottom: 1px solid #e0e0e0;">Assigned To:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e0e0e0;">${escapeNotificationHtml_(item.Assigned || item.Owner || 'Assigned Team')}</td>
+          </tr>
+        </table>
+        
+        <div style="margin: 18px 0; padding: 14px 18px; background-color: #f8f9fa; border-left: 4px solid #1a73e8; border-radius: 4px;">
+          <strong style="color: #202124; display: block; margin-bottom: 6px;">Delegation Instructions:</strong>
+          <div style="color: #3c4043; font-size: 14px;">${bodyFormatted}</div>
+        </div>
+        
+        ${driveFolderUrl ? `
+          <div style="margin: 16px 0; padding: 12px 16px; background-color: #e8f0fe; border-radius: 6px; font-size: 13.5px; color: #1967d2;">
+            📁 <strong>System Drive Folder:</strong> All originator files and documents have been cloned into our system folder for this task:
+            <div style="margin-top: 6px;"><a href="${driveFolderUrl}" target="_blank" style="color: #1a73e8; font-weight: bold; text-decoration: underline;">Open Item Drive Folder</a></div>
+          </div>
+        ` : ''}
+        
+        <p style="font-size: 14px; margin-bottom: 20px;">
+          Please review the materials and provide regular status updates or complete your response using the links below:
+        </p>
+        
+        <div style="margin-bottom: 24px; text-align: center;">
+          <a href="${boardUrl}" style="display: inline-block; background-color: #1a73e8; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; margin-right: 10px;">
+            Open in Kanban Board
+          </a>
+          <a href="${guestUrl}" style="display: inline-block; background-color: #5f6368; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px;">
+            Open in Guest Portal
+          </a>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #dadce0; margin: 24px 0 16px 0;">
+        <p style="font-size: 12px; color: #70757a; margin: 0;">
+          💡 You can reply directly to this email to contact ${escapeNotificationHtml_(currentUser || 'the delegator')}.
+        </p>
+      </div>
+    `;
+    
+    sendMaskedEmail_({
+      to: resolvedEmails.join(','),
+      subject: finalSubject,
+      htmlBody: htmlBody,
+      replyTo: currentUser || undefined
+    });
+    
+    // Log audit note
+    const logText = `📨 Delegation assignment email sent to ${resolvedEmails.join(', ')} by ${currentUser || 'System'}`;
+    try {
+      addNote(itemId, logText, 'System.Delegation', item.Title);
+    } catch(noteErr) {
+      console.warn("Could not log delegation audit note: " + noteErr.message);
+    }
+    
+    return {
+      success: true,
+      message: `Delegation assignment email sent to ${resolvedEmails.join(', ')}.`
+    };
+  } catch(err) {
+    console.error("sendDelegationAssignmentEmail error: " + err.message);
+    return {
+      success: false,
+      message: err.message
+    };
+  }
 }

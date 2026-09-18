@@ -54,9 +54,40 @@ function saveItem(form, changeLog) {
     createLinkShortcuts_(folderId2, oldDriveLink, driveLink2);
   }
 
-  // 5.4 For type migrations: rename & move the existing Drive folder to the new type's base folder
+  // 5.1 Clone files from originator source Drive folder/files (if specified)
+  let copiedFilesCount = 0;
   let finalFolderId = folderId2;
   let finalDriveLink = driveLink2;
+
+  if (form.SourceDriveLink && finalFolderId) {
+    try {
+      const cloneResult = cloneSourceFilesToFolder_(form.SourceDriveLink, finalFolderId, finalId);
+      if (cloneResult && cloneResult.success && cloneResult.count > 0) {
+        copiedFilesCount = cloneResult.count;
+        const newFileLinks = cloneResult.files.map(f => f.url).filter(Boolean);
+        if (newFileLinks.length > 0) {
+          finalDriveLink = `${finalDriveLink}\n${newFileLinks.join('\n')}`.trim();
+        }
+        changeLog = changeLog || [];
+        changeLog.push(`Cloned ${cloneResult.count} file(s) from originator source folder into system folder.`);
+        try {
+          addNote(finalId, `📁 Cloned ${cloneResult.count} file(s) from originator source into system folder:\n${cloneResult.files.map(f => '• ' + f.name).join('\n')}`, 'System.Drive', form.Title);
+        } catch(noteErr) {
+          console.warn("Could not log clone note: " + noteErr.message);
+        }
+      } else if (cloneResult && !cloneResult.success && cloneResult.error) {
+        changeLog = changeLog || [];
+        changeLog.push(`Warning: Source file cloning failed: ${cloneResult.error}`);
+        try {
+          addNote(finalId, `⚠️ Warning: Could not clone files from originator source: ${cloneResult.error}`, 'System.Drive', form.Title);
+        } catch(noteErr) {}
+      }
+    } catch(cloneErr) {
+      console.error(`SourceDriveLink processing failed for ${finalId}: ${cloneErr.message}`);
+    }
+  }
+
+  // 5.4 For type migrations: rename & move the existing Drive folder to the new type's base folder
   if (isTypeMigration && existingFolderId) {
     try {
       const migrationResult = migrateItemFolder_(existingFolderId, form.ID, finalId, form.Title, form.Type, oldDriveLink);
@@ -120,7 +151,13 @@ function saveItem(form, changeLog) {
     }
   }
 
-  return { success: true, id: finalId };
+  return { 
+    success: true, 
+    id: finalId, 
+    folderId: finalFolderId, 
+    driveLink: finalDriveLink, 
+    copiedFilesCount: copiedFilesCount 
+  };
 }
 
 /**
@@ -453,6 +490,105 @@ function handlePrimaryDoc_(folderId, newDocUrl) {
     }
 }
 
+/**
+ * Copies all files from the specified originator Google Drive folder or file link(s)
+ * directly into our system-created destination folder.
+ * This guarantees our organization owns the copies and downstream assignees immediately
+ * have access without waiting for external permissions.
+ *
+ * @param {string} sourceLinks Single URL or multiline string of Drive URLs.
+ * @param {string} destinationFolderId The system item folder ID where copies should be placed.
+ * @param {string} finalId The item ID (e.g. TASK-1001).
+ * @returns {{success: boolean, count: number, files: Array<{name: string, url: string, id: string}>, error?: string}}
+ */
+function cloneSourceFilesToFolder_(sourceLinks, destinationFolderId, finalId) {
+  if (!sourceLinks || !destinationFolderId) {
+    return { success: false, count: 0, files: [] };
+  }
+
+  const copiedFiles = [];
+  let destinationFolder;
+  try {
+    destinationFolder = DriveApp.getFolderById(destinationFolderId);
+  } catch (e) {
+    console.error(`cloneSourceFilesToFolder_: Destination folder ${destinationFolderId} not accessible: ${e.message}`);
+    return { success: false, count: 0, files: [], error: `Destination folder not accessible: ${e.message}` };
+  }
+
+  const rawLines = sourceLinks.split(/[\r\n,]+/).map(l => l.trim()).filter(Boolean);
+  
+  rawLines.forEach(line => {
+    try {
+      // 1. Check for Drive Folder URL
+      const folderMatch = line.match(/\/folders\/([a-zA-Z0-9_-]{20,})/);
+      if (folderMatch) {
+        const sourceFolderId = folderMatch[1];
+        try {
+          const sourceFolder = DriveApp.getFolderById(sourceFolderId);
+          copyFolderContentsRecursively_(sourceFolder, destinationFolder, copiedFiles);
+        } catch (fErr) {
+          console.error(`Failed to copy from source folder ${sourceFolderId}: ${fErr.message}`);
+          throw new Error(`Could not access source folder: ${fErr.message}`);
+        }
+        return;
+      }
+
+      // 2. Check for Drive File URL (Doc, Sheet, Slide, generic file)
+      const fileMatch = line.match(/\/d\/([a-zA-Z0-9_-]{20,})/) || line.match(/id=([a-zA-Z0-9_-]{20,})/);
+      if (fileMatch) {
+        const sourceFileId = fileMatch[1];
+        try {
+          const sourceFile = DriveApp.getFileById(sourceFileId);
+          const copy = sourceFile.makeCopy(sourceFile.getName(), destinationFolder);
+          copiedFiles.push({ name: copy.getName(), url: copy.getUrl(), id: copy.getId() });
+        } catch (fileErr) {
+          console.error(`Failed to copy source file ${sourceFileId}: ${fileErr.message}`);
+          throw new Error(`Could not access source file: ${fileErr.message}`);
+        }
+        return;
+      }
+
+      console.warn(`cloneSourceFilesToFolder_: Unrecognized Google Drive URL: ${line}`);
+    } catch (err) {
+      console.error(`Error processing link ${line}: ${err.message}`);
+    }
+  });
+
+  return {
+    success: true,
+    count: copiedFiles.length,
+    files: copiedFiles
+  };
+}
+
+/**
+ * Recursively copies all files in sourceFolder into targetFolder.
+ * @private
+ */
+function copyFolderContentsRecursively_(sourceFolder, targetFolder, copiedFiles) {
+  const files = sourceFolder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    try {
+      const copy = file.makeCopy(file.getName(), targetFolder);
+      copiedFiles.push({ name: copy.getName(), url: copy.getUrl(), id: copy.getId() });
+    } catch (err) {
+      console.warn(`Could not copy file ${file.getName()}: ${err.message}`);
+    }
+  }
+
+  const subfolders = sourceFolder.getFolders();
+  while (subfolders.hasNext()) {
+    const subfolder = subfolders.next();
+    try {
+      const targetSubfolder = targetFolder.createFolder(subfolder.getName());
+      copyFolderContentsRecursively_(subfolder, targetSubfolder, copiedFiles);
+    } catch (err) {
+      console.warn(`Could not copy subfolder ${subfolder.getName()}: ${err.message}`);
+    }
+  }
+}
+
 
 /**
  * Requests a native Google Docs approval on a document.
@@ -593,6 +729,7 @@ function processAsyncTemplateCopy_(e) {
 
 /**
  * Grants editor access to a Drive folder for a list of names/emails using parallel batch processing.
+ * Supports "First Last <email@gsa.gov>", plain emails, and comma-separated lists.
  */
 function grantFolderAccessFast_(folderId, identifiers) {
     if(!identifiers || identifiers.length === 0 || !folderId) return;
@@ -608,35 +745,136 @@ function grantFolderAccessFast_(folderId, identifiers) {
         });
     }
 
-    // 2. Resolve identifiers to emails
+    // 2. Resolve identifiers to clean emails
     let emails = [];
     identifiers.forEach(id => {
-        let cleanId = id.trim().toLowerCase();
-        if (!cleanId) return;
-        if (cleanId.includes('@')) {
-            emails.push(cleanId);
-        } else if (emailMap.has(cleanId)) {
-            emails.push(emailMap.get(cleanId));
+        if (!id) return;
+        const str = String(id).trim();
+        // Check for angle brackets: Name <email@gsa.gov>
+        const angleMatch = str.match(/<([^>]+@[^>]+)>/g);
+        if (angleMatch) {
+            angleMatch.forEach(m => {
+                const clean = m.replace(/[<>]/g, '').trim().toLowerCase();
+                if (clean.includes('@')) emails.push(clean);
+            });
+        } else {
+            // Check for plain emails
+            const plainMatches = str.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g);
+            if (plainMatches) {
+                plainMatches.forEach(m => emails.push(m.trim().toLowerCase()));
+            } else {
+                // Name lookup
+                const cleanName = str.toLowerCase();
+                if (emailMap.has(cleanName)) {
+                    emails.push(emailMap.get(cleanName));
+                }
+            }
         }
     });
 
     const validEmails = [...new Set(emails.filter(e => e.includes('@')))];
     if(validEmails.length === 0) return;
     
-    const token = ScriptApp.getOAuthToken();
-    const requests = validEmails.map(email => ({
-        url: `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false`,
-        method: 'post',
-        contentType: 'application/json',
-        headers: { Authorization: "Bearer " + token },
-        payload: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email }),
-        muteHttpExceptions: true
-    }));
-    
+    // 3. Check existing permissions first to prevent duplicate grants and notification spam
+    const alreadyHasAccess = new Set();
     try {
-        UrlFetchApp.fetchAll(requests);
+        if (typeof Drive !== 'undefined' && Drive.Permissions && Drive.Permissions.list) {
+            const permList = Drive.Permissions.list(folderId, {
+                supportsAllDrives: true,
+                fields: 'permissions(id,emailAddress,role)'
+            });
+            if (permList && permList.permissions) {
+                permList.permissions.forEach(p => {
+                    if (p.emailAddress && (p.role === 'writer' || p.role === 'owner' || p.role === 'organizer' || p.role === 'fileOrganizer')) {
+                        alreadyHasAccess.add(p.emailAddress.toLowerCase());
+                    }
+                });
+            }
+        }
     } catch(e) {
-        console.error("Failed to batch grant folder access: " + e.message);
+        console.warn("Drive.Permissions.list check failed: " + e.message);
+    }
+
+    // Fallback: check DriveApp editors / owner if alreadyHasAccess is empty
+    if (alreadyHasAccess.size === 0) {
+        try {
+            const folder = DriveApp.getFolderById(folderId);
+            try {
+                const owner = folder.getOwner();
+                if (owner && owner.getEmail()) alreadyHasAccess.add(owner.getEmail().toLowerCase());
+            } catch(e) {}
+            try {
+                folder.getEditors().forEach(u => {
+                    if (u && u.getEmail()) alreadyHasAccess.add(u.getEmail().toLowerCase());
+                });
+            } catch(e) {}
+        } catch(e) {
+            console.warn("DriveApp check existing editors failed: " + e.message);
+        }
+    }
+
+    // Filter out users who already have writer/owner access
+    const toGrant = validEmails.filter(e => !alreadyHasAccess.has(e));
+    if (toGrant.length === 0) {
+        // Everyone already has editor access! No-op: zero API calls, zero notification emails.
+        return;
+    }
+
+    // 4. Grant access silently (sendNotificationEmail: false)
+    const stillNeedFallback = [];
+    toGrant.forEach(email => {
+        let granted = false;
+        try {
+            if (typeof Drive !== 'undefined' && Drive.Permissions && Drive.Permissions.create) {
+                Drive.Permissions.create(
+                    { role: 'writer', type: 'user', emailAddress: email },
+                    folderId,
+                    { sendNotificationEmail: false, supportsAllDrives: true }
+                );
+                granted = true;
+            }
+        } catch(err) {
+            console.warn(`Drive.Permissions.create failed for ${email}: ${err.message}`);
+        }
+        if (!granted) {
+            stillNeedFallback.push(email);
+        }
+    });
+
+    // 5. REST API fallback if Drive.Permissions.create was unavailable
+    if (stillNeedFallback.length > 0) {
+        const token = ScriptApp.getOAuthToken();
+        const requests = stillNeedFallback.map(email => ({
+            url: `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`,
+            method: 'post',
+            contentType: 'application/json',
+            headers: { Authorization: "Bearer " + token },
+            payload: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email }),
+            muteHttpExceptions: true
+        }));
+        
+        try {
+            const responses = UrlFetchApp.fetchAll(requests);
+            responses.forEach((res, idx) => {
+                const code = res.getResponseCode();
+                if (code >= 400) {
+                    console.warn(`Drive REST API permission grant for ${stillNeedFallback[idx]} returned ${code}: ${res.getContentText()}`);
+                    try {
+                        DriveApp.getFolderById(folderId).addEditor(stillNeedFallback[idx]);
+                    } catch(fallbackErr) {
+                        console.error(`DriveApp fallback failed for ${stillNeedFallback[idx]}: ${fallbackErr.message}`);
+                    }
+                }
+            });
+        } catch(e) {
+            console.error("Failed to batch grant folder access via UrlFetch: " + e.message);
+            try {
+                const folder = DriveApp.getFolderById(folderId);
+                stillNeedFallback.forEach(email => {
+                    try { folder.addEditor(email); } catch(err) {}
+                });
+            } catch(fallbackAllErr) {}
+        }
     }
 }
 
