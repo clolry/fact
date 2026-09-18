@@ -80,8 +80,16 @@ function getProjectsData_(includeArchived = false) {
       if (!isProject) {
           card.RecDate = cleanDate(getVal('RecDate') || getVal('Received_Date'));
           card.IntDue = cleanDate(getVal('IntDue') || getVal('Internal_Due_Date'));
-          card.DataCallNo = getVal('DataCallNo') || getVal('Data_Call_No');
-          card.Requestor = getVal('Requestor');
+           card.DataCallNo = getVal('DataCallNo') || getVal('Data_Call_No');
+           const rawReq = getVal('Requestor');
+           if (rawReq !== '' && rawReq !== undefined && rawReq !== null && !isNaN(String(rawReq).trim()) && !isNaN(parseFloat(String(rawReq).trim()))) {
+               // Recover from intake/follow-up email note if available, otherwise clear corrupted numeric rank
+               const noteText = card.LatestNote || noteMap[card.ID] || '';
+               const m = noteText.match(/(?:INTAKE|FOLLOW-UP)\s+EMAIL\s+from\s+([^(\n:]+)/i);
+               card.Requestor = m ? m[1].trim() : '';
+           } else {
+               card.Requestor = rawReq;
+           }
       } else {
           card.StartDate = cleanDate(getVal('StartDate'));
           card.IntDue = cleanDate(getVal('IntDue') || getVal('Internal_Due_Date'));
@@ -255,7 +263,8 @@ function getItemDetails(id) {
                 Description: getVal('Desc') || getVal('Description'), Complexity: getVal('Complexity'), Urgency: getVal('Urgency'), ExecStatus: getVal('ExecStatus'),
                 ThreadID: getVal('ThreadID'), DriveLink: getVal('DriveLink'), 
                 RecDate: cleanDate(getVal('RecDate')), IntDue: cleanDate(getVal('IntDue')),
-                Requestor: getVal('Requestor'), CompletedDate: cleanDate(getVal('CompletedDate')),     
+                Requestor: (getVal('Requestor') !== '' && !isNaN(String(getVal('Requestor')).trim()) && !isNaN(parseFloat(String(getVal('Requestor')).trim()))) ? '' : getVal('Requestor'), 
+                CompletedDate: cleanDate(getVal('CompletedDate')),     
                 Archived: (getVal('Archived') === 'TRUE'), StatusSummary: getVal('StatusSummary'),
                 WorkflowStep: getVal('WorkflowStep'),
                 Primary_Doc_ID: getVal('Primary_Doc_ID') || r[37] || '',

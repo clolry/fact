@@ -969,6 +969,51 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
 .fact-modal-btn-success { background: #188038; color: white; }
 .fact-modal-btn-danger { background: #d93025; color: white; }
 .fact-modal-btn-secondary { background: #f1f3f4; color: #3c4043; }
+
+/* Item Header Action Buttons */
+.fact-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    border-radius: 6px;
+    border: 1px solid var(--border, #dadce0);
+    background: var(--bg-card, #ffffff);
+    color: var(--text-main, #3c4043);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    text-decoration: none;
+    line-height: 1.2;
+}
+.fact-action-btn:hover {
+    background: var(--bg-body, #f1f3f4);
+    border-color: var(--accent, #1a73e8);
+    color: var(--accent, #1a73e8);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.fact-action-btn:active {
+    transform: scale(0.98);
+}
+.card-link-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.82rem;
+    padding: 2px 4px;
+    opacity: 0.6;
+    transition: opacity 0.2s, transform 0.15s;
+    border-radius: 4px;
+    line-height: 1;
+}
+.card-link-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+    background: rgba(0,0,0,0.05);
+}
 /* Toast Notifications */
 #fact-toast-container {
     position: fixed; bottom: 24px; right: 24px; z-index: 99998;
@@ -1983,6 +2028,17 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
            <button id="btn-back" onclick="goBackToParent()" style="display:none; background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--accent);" title="Back to Parent">⬅</button>
            <h3 id="m-title" style="margin:0;">Edit Item</h3>
         </div>
+        <div id="modal-item-actions" style="display:none; align-items:center; gap:8px; margin-left:auto; margin-right:15px; flex-wrap:wrap;">
+           <button type="button" class="fact-action-btn" onclick="copyItemDeepLink()" title="Copy direct link to this item">
+             <span>🔗</span> <span>Copy Link</span>
+           </button>
+           <button type="button" class="fact-action-btn" onclick="chatWithOwner()" title="Open 1:1 Google Chat with owner and copy item link">
+             <span>💬</span> <span>Chat Owner</span>
+           </button>
+           <button type="button" class="fact-action-btn" onclick="pingOwnerByEmail()" title="Send status update request email directly to owner">
+             <span>📧</span> <span>Ping Owner by Email</span>
+           </button>
+        </div>
         <div style="display:flex; gap:15px; align-items:center;">
           <button onclick="refreshCurrentModal()" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--accent);" title="Refresh Data">🔄</button>
           <button onclick="closeForm()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;" title="Close">&times;</button>
@@ -2394,6 +2450,133 @@ window.QT1D = {
   sortMode: 'rank',
   viewState: { dates: false, note: false, desc: false, complex: false, req: false, summary: false, assigned: false } 
 };
+
+  const FACT_APP_URL = "<?= ScriptApp.getService().getUrl() ?>";
+
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    } else {
+      return new Promise((resolve, reject) => {
+        try {
+          const textArea = document.createElement("textarea");
+          textArea.value = text;
+          textArea.style.position = "fixed";
+          textArea.style.left = "-999999px";
+          textArea.style.top = "-999999px";
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          const successful = document.execCommand('copy');
+          textArea.remove();
+          if (successful) resolve();
+          else reject(new Error('execCommand copy returned false'));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+  }
+
+  function getItemDeepLink(itemId, forGuest) {
+    const base = (typeof FACT_APP_URL !== 'undefined' && FACT_APP_URL) ? FACT_APP_URL : (window.location.origin + window.location.pathname);
+    if (forGuest) {
+      return `${base}?page=guestportal&id=${encodeURIComponent(itemId)}`;
+    }
+    return `${base}?id=${encodeURIComponent(itemId)}`;
+  }
+
+  function copyItemDeepLink() {
+    const id = document.getElementById('f_id').value;
+    if (!id) {
+      showToast('No active item to copy link for.', 'warning');
+      return;
+    }
+    const url = getItemDeepLink(id);
+    copyTextToClipboard(url).then(() => {
+      showToast(`🔗 Link copied to clipboard for ${id}`, 'success');
+    }).catch(() => {
+      showToast(`URL: ${url}`, 'info');
+    });
+  }
+
+  function copyDirectCardLink(id) {
+    if (!id) return;
+    const url = getItemDeepLink(id);
+    copyTextToClipboard(url).then(() => {
+      showToast(`🔗 Link copied to clipboard for ${id}`, 'success');
+    }).catch(() => {
+      showToast(`URL: ${url}`, 'info');
+    });
+  }
+
+  function chatWithOwner() {
+    const id = document.getElementById('f_id').value;
+    const rawOwner = document.getElementById('f_owner').value || '';
+    
+    let email = '';
+    const emailMatch = rawOwner.match(/<([^>]+@[^>]+)>/) || rawOwner.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    if (emailMatch) {
+      email = emailMatch[1].trim().toLowerCase();
+    }
+    
+    if (!email) {
+      showToast('No owner email found. Please assign an owner with an email address.', 'warning');
+      return;
+    }
+    
+    // Auto-copy the item deep link so user can immediately paste it into the 1:1 chat
+    if (id) {
+      const link = getItemDeepLink(id);
+      copyTextToClipboard(link).catch(() => {});
+    }
+    
+    const chatUrl = 'https://chat.google.com/dm/' + encodeURIComponent(email);
+    window.open(chatUrl, '_blank');
+    showToast(`💬 Opening Chat with ${email}! Card link copied to clipboard.`, 'success');
+  }
+
+  function pingOwnerByEmail() {
+    const id = document.getElementById('f_id').value;
+    if (!id) {
+      showToast('Please open an existing item first.', 'warning');
+      return;
+    }
+    const rawOwner = document.getElementById('f_owner').value || '';
+    let email = '';
+    const emailMatch = rawOwner.match(/<([^>]+@[^>]+)>/) || rawOwner.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    if (emailMatch) {
+      email = emailMatch[1].trim().toLowerCase();
+    }
+    
+    const displayName = rawOwner.split('<')[0].trim() || email || 'the owner';
+    
+    showPrompt(
+      `Send a status update reminder email directly to ${displayName}${email ? ' (' + email + ')' : ''}?\n\nYou can add an optional note below (or leave blank):`,
+      '📧 Ping Owner by Email',
+      'Optional note or question for the owner...',
+      function(customNote) {
+        if (customNote === null) return; // User clicked Cancel
+        showToast(`Sending status update request email to ${displayName}...`, 'info');
+        google.script.run
+          .withSuccessHandler(function(res) {
+            if (res && res.success) {
+              showToast(`📧 ${res.message}`, 'success');
+              if (id) {
+                google.script.run.withSuccessHandler(notes => renderNotes(notes)).getNotes(id);
+              }
+            } else {
+              showToast(res ? res.message : 'Failed to send ping email.', 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            showToast('Error sending ping email: ' + (err.message || err), 'error');
+          })
+          .pingOwnerForUpdate(id, customNote);
+      },
+      false
+    );
+  }
 
   function switchTab(tabName){
     document.querySelectorAll('.tab').forEach(e => e.classList.remove('active'));
@@ -2816,7 +2999,11 @@ function renderBoard(){
 
           // D. REQUESTOR
           if (QT1D.viewState.req && p.Requestor) {
-             extraHtml += `<div style="font-size:0.7rem; color:#005ea2; margin-top:4px;">👤 Req: ${p.Requestor}</div>`;
+             const reqVal = String(p.Requestor).trim();
+             if (reqVal && isNaN(reqVal)) {
+                const cleanReq = reqVal.replace(/<.*?>/g, '').trim() || reqVal;
+                extraHtml += `<div style="font-size:0.7rem; color:#005ea2; margin-top:4px;">👤 Req: ${cleanReq}</div>`;
+             }
           }
 
           // E. DESCRIPTION
@@ -2844,6 +3031,7 @@ function renderBoard(){
                 <span class="tag" style="font-weight:bold; color:#1a73e8; font-size:0.75rem;">${p.Type||'Task'}</span>
                 ${p.Urgency==='Critical' ? '<span style="margin-left:5px;">🔥</span>' : ''}
                 ${clipIcon}
+                <button type="button" class="card-link-btn" onclick="event.stopPropagation(); copyDirectCardLink('${p.ID}')" title="Copy direct link to card">🔗</button>
              </div>
              <div class="card-title">${p.Title}</div>
              <div style="font-size:0.8rem; color:#555; margin-bottom:4px;">${p.Owner||'Unassigned'}</div>
@@ -3386,6 +3574,8 @@ function enableWeeklyReview() {
       }
 
       document.getElementById('m-title').textContent = "Edit " + id;
+      const modalActions = document.getElementById('modal-item-actions');
+      if (modalActions) modalActions.style.display = 'flex';
       document.getElementById('f_id').value = p.ID;
       document.getElementById('f_thread_id').value = p.ThreadID || '';
       document.getElementById('f_title').value = p.Title;
@@ -3627,6 +3817,8 @@ function enableWeeklyReview() {
       }).getItemAuditLog(id);
     } else {
       document.getElementById('m-title').textContent = "New Item";
+      const modalActions = document.getElementById('modal-item-actions');
+      if (modalActions) modalActions.style.display = 'none';
       document.getElementById('f_id').value = '';
       if(document.getElementById('f_summary')) document.getElementById('f_summary').value = '';
       if(document.getElementById('summary-log')) document.getElementById('summary-log').textContent = '';
@@ -6723,12 +6915,16 @@ function renderGridBody(items) {
       }
 
       if (gridState.visibleExtra.requestor && item.Requestor) {
-        parts.push(`
-          <span>
-            <span style="font-weight:600; color:var(--sub);">Requestor:</span>
-            ${item.Requestor}
-          </span>
-        `);
+        const reqVal = String(item.Requestor).trim();
+        if (reqVal && isNaN(reqVal)) {
+          const cleanReq = reqVal.replace(/<.*?>/g, '').trim() || reqVal;
+          parts.push(`
+            <span>
+              <span style="font-weight:600; color:var(--sub);">Requestor:</span>
+              ${cleanReq}
+            </span>
+          `);
+        }
       }
 
       if (parts.length > 0) {
@@ -6980,12 +7176,16 @@ function renderGridBodyGrouped(items, groupBy = 'due') {
           }
         }
         if (gridState.visibleExtra.requestor && item.Requestor) {
-          parts.push(`
-            <span>
-              <span style="font-weight:600; color:var(--sub);">Requestor:</span>
-              ${item.Requestor}
-            </span>
-          `);
+          const reqVal = String(item.Requestor).trim();
+          if (reqVal && isNaN(reqVal)) {
+            const cleanReq = reqVal.replace(/<.*?>/g, '').trim() || reqVal;
+            parts.push(`
+              <span>
+                <span style="font-weight:600; color:var(--sub);">Requestor:</span>
+                ${cleanReq}
+              </span>
+            `);
+          }
         }
         if (parts.length > 0) {
           secondLineHtml = `
@@ -8869,13 +9069,45 @@ function renderStatusLogTable() {
         try {
             logs = JSON.parse(jsonStr);
         } catch (e) {
-            // Legacy plain text
-            logs = [{
-                date: new Date().toLocaleDateString(),
-                status: 'In Progress',
-                comment: jsonStr
-            }];
+            const jsonStart = jsonStr.indexOf('[{');
+            if (jsonStart !== -1) {
+                try {
+                    logs = JSON.parse(jsonStr.substring(jsonStart));
+                    const prefix = jsonStr.substring(0, jsonStart).trim();
+                    if (prefix) {
+                        const dateMatch = prefix.match(/^\[(.*?)\]/);
+                        logs.push({
+                            date: dateMatch ? dateMatch[1] : new Date().toLocaleDateString(),
+                            status: document.getElementById('f_action_needed') ? document.getElementById('f_action_needed').value : 'In Progress',
+                            comment: prefix.replace(/^\[.*?\]\s*/, '')
+                        });
+                    }
+                } catch (e2) {
+                    logs = [{
+                        date: new Date().toLocaleDateString(),
+                        status: 'In Progress',
+                        comment: jsonStr
+                    }];
+                }
+            } else {
+                // Legacy plain text
+                logs = [{
+                    date: new Date().toLocaleDateString(),
+                    status: 'In Progress',
+                    comment: jsonStr
+                }];
+            }
         }
+    }
+    
+    // Clean any stray JSON string fragments inside comments if present
+    if (Array.isArray(logs)) {
+        logs.forEach(log => {
+            if (typeof log.comment === 'string' && log.comment.includes('[{')) {
+                const embeddedIdx = log.comment.indexOf('[{');
+                log.comment = log.comment.substring(0, embeddedIdx).trim();
+            }
+        });
     }
     
     if (!Array.isArray(logs) || logs.length === 0) {

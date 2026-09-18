@@ -106,14 +106,14 @@ function setupSystemTriggers() {
     console.log('Created trigger for processWorkflowDeadlines (Daily at 6 AM)');
   }
 
-  // 3. Internal Due Reminders (Runs Daily at 8 AM)
-  if (!triggerExists('sendInternalDueReminders_')) {
-    ScriptApp.newTrigger('sendInternalDueReminders_')
+  // 3. Due Date Reminders (Runs Daily at 8 AM)
+  if (!triggerExists('sendDueDateReminders') && !triggerExists('sendInternalDueReminders_')) {
+    ScriptApp.newTrigger('sendDueDateReminders')
       .timeBased()
       .atHour(8)
       .everyDays(1)
       .create();
-    console.log('Created trigger for sendInternalDueReminders_ (Daily at 8 AM)');
+    console.log('Created trigger for sendDueDateReminders (Daily at 8 AM)');
   }
 
   // 4. Group Emails & Thread Sync (Runs every 10 minutes)
@@ -124,7 +124,35 @@ function setupSystemTriggers() {
       .create();
     console.log('Created trigger for processGroupEmails (Every 10 minutes)');
   }
+
+  // 5. Sunday Auto-Archive 'Done' & 'Cancelled' Items (Sundays at 2 AM)
+  if (!triggerExists('autoArchiveDoneItems')) {
+    ScriptApp.newTrigger('autoArchiveDoneItems')
+      .timeBased()
+      .onWeekDay(ScriptApp.WeekDay.SUNDAY)
+      .atHour(2)
+      .create();
+    console.log('Created trigger for autoArchiveDoneItems (Sundays at 2 AM)');
+  }
+
+  // 6. Daily Recurring Tasks Generator (Daily at 1 AM)
+  if (!triggerExists('generateRecurringTasks')) {
+    ScriptApp.newTrigger('generateRecurringTasks')
+      .timeBased()
+      .atHour(1)
+      .everyDays(1)
+      .create();
+    console.log('Created trigger for generateRecurringTasks (Daily at 1 AM)');
+  }
   
   console.log('Trigger setup complete!');
+}
+
+// Fallback aliases so legacy trigger definitions never throw 'function not found'
+function sendInternalDueReminders_() {
+  if (typeof sendDueDateReminders === 'function') sendDueDateReminders();
+}
+function processWorkflowDeadlines() {
+  if (typeof sendDueDateReminders === 'function') sendDueDateReminders();
 }
 

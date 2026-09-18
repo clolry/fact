@@ -61,6 +61,16 @@
             
             <div id="comment-section">
                 <h2>Add an Update or Comment</h2>
+                <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+                    <label for="comment-health-status" style="font-weight: 600; color: #202124; font-size: 0.9rem;">Action / Health Indicator:</label>
+                    <select id="comment-health-status" style="padding: 6px 10px; border: 1px solid #dadce0; border-radius: 4px; font-size: 0.9rem; font-weight: 500;">
+                        <option value="In Progress" style="background:#e8f0fe; color:#1a73e8;">In Progress</option>
+                        <option value="Needs Decision" style="background:#fef7e0; color:#b06000;">Needs Decision</option>
+                        <option value="Blocked" style="background:#fce8e6; color:#d93025;">Blocked</option>
+                        <option value="At Risk" style="background:#fff3e0; color:#e65100;">At Risk</option>
+                        <option value="Completed" style="background:#e6f4ea; color:#188038;">Completed</option>
+                    </select>
+                </div>
                 <textarea id="comment-text" placeholder="Type your comment here..."></textarea>
                 <button id="submit-comment-btn" onclick="submitComment()">Submit Comment</button>
                 <div id="comment-response"></div>
@@ -208,6 +218,10 @@
     // Reset the new comment form
     document.getElementById('comment-text').value = '';
     document.getElementById('comment-response').textContent = '';
+    const healthSelect = document.getElementById('comment-health-status');
+    if (healthSelect) {
+        healthSelect.value = action.healthStatus || 'In Progress';
+    }
     window.scrollTo(0, 0); // Scroll to the top of the page
 }
 
@@ -222,6 +236,7 @@
 
         function submitComment() {
             const commentText = document.getElementById('comment-text').value;
+            const healthStatus = document.getElementById('comment-health-status') ? document.getElementById('comment-health-status').value : 'In Progress';
             if (!commentText.trim() || !currentActionId) return;
             const btn = document.getElementById('submit-comment-btn');
             btn.disabled = true;
@@ -235,8 +250,13 @@
                     respEl.textContent = response.message;
                     respEl.style.color = '#188038';
                     const action = allActions.find(a => a.id === currentActionId);
+                    if (action && response.statusSummary) {
+                        action.statusSummary = response.statusSummary;
+                        action.healthStatus = healthStatus;
+                        document.getElementById('detail-summary').textContent = response.statusSummary;
+                    }
                     google.script.run.withSuccessHandler(notes => {
-                        action.notes = notes;
+                        if (action) action.notes = notes;
                         showDetailView(currentActionId);
                     }).getGuestNotesForItem(currentActionId);
                 })
@@ -247,7 +267,7 @@
                     respEl.textContent = error.message;
                     respEl.style.color = '#d93025';
                 })
-                .addGuestComment(currentActionId, commentText);
+                .addGuestComment(currentActionId, commentText, healthStatus);
         }
 
         function getStatusClass(status) {

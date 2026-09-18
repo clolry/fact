@@ -281,15 +281,20 @@ function autoArchiveDoneItems() {
     const lastRow = srcSheet.getLastRow();
     if (lastRow < 2) return;
 
+    const numCols = srcSheet.getLastColumn();
+    const headers = srcSheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const statusColIdx = headers.indexOf('Status');
+    const statusIdx = (statusColIdx !== -1) ? statusColIdx : (m.statusCol - 1);
+
     // Get all data
-    const range = srcSheet.getRange(2, 1, lastRow - 1, srcSheet.getLastColumn());
+    const range = srcSheet.getRange(2, 1, lastRow - 1, numCols);
     const values = range.getValues();
     
     const toKeep = [];
     const toArchive = [];
 
     for (let i = 0; i < values.length; i++) {
-      const status = values[i][m.statusCol - 1]; 
+      const status = values[i][statusIdx]; 
       
       if (status === 'Done' || status === 'Cancelled') {
          toArchive.push(values[i]);
@@ -299,14 +304,19 @@ function autoArchiveDoneItems() {
     }
 
     if (toArchive.length > 0) {
+       // Ensure destSheet has enough columns
+       if (destSheet.getMaxColumns() < numCols) {
+         destSheet.insertColumnsAfter(destSheet.getMaxColumns(), numCols - destSheet.getMaxColumns());
+       }
+
        // Append to Archive
-       destSheet.getRange(destSheet.getLastRow() + 1, 1, toArchive.length, toArchive[0].length).setValues(toArchive);
+       destSheet.getRange(destSheet.getLastRow() + 1, 1, toArchive.length, numCols).setValues(toArchive);
        
        // Clear Source and Rewrite Keepers
-       srcSheet.getRange(2, 1, lastRow - 1, srcSheet.getLastColumn()).clearContent();
+       srcSheet.getRange(2, 1, lastRow - 1, numCols).clearContent();
        
        if (toKeep.length > 0) {
-         srcSheet.getRange(2, 1, toKeep.length, toKeep[0].length).setValues(toKeep);
+         srcSheet.getRange(2, 1, toKeep.length, numCols).setValues(toKeep);
        }
        
        totalMoved += toArchive.length;

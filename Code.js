@@ -231,15 +231,33 @@ function postCheckInToChat(e) {
   if (!e) return; 
   // ... (Keep your existing chat logic if you have it here, otherwise it's safe to omit)
 }
+function testChatWebhook_() {
+  testChatWebhook();
+}
+
 function testChatWebhook() {
-  if (!CHAT_WEBHOOK_URL) {
-    SpreadsheetApp.getUi().alert('Please set the CHAT_WEBHOOK property.');
+  const webhookUrl = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK') || PropertiesService.getScriptProperties().getProperty('NOTIFICATION_CHAT_WEBHOOK');
+  if (!webhookUrl) {
+    SpreadsheetApp.getUi().alert('Please set the CHAT_WEBHOOK script property in Project Settings.');
     return;
   }
-  UrlFetchApp.fetch(CHAT_WEBHOOK_URL, {
-    method: 'post', contentType: 'application/json',
-    payload: JSON.stringify({ text: `✅ ${config.workgroupName || 'PMSC'} System: Webhook connection successful!` })
-  });
+  const config = loadConfig_();
+  const wg = config.workgroupName || 'FACT';
+  try {
+    const res = UrlFetchApp.fetch(webhookUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ text: `✅ ${wg} System: Webhook connection successful!` }),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() >= 200 && res.getResponseCode() < 300) {
+      SpreadsheetApp.getUi().alert(`✅ Test message sent successfully to Google Chat for ${wg}!`);
+    } else {
+      SpreadsheetApp.getUi().alert(`⚠️ Error sending to Chat: HTTP ${res.getResponseCode()}\n${res.getContentText()}`);
+    }
+  } catch(e) {
+    SpreadsheetApp.getUi().alert(`❌ Webhook error: ${e.message}`);
+  }
 }
 function getGuestPortalUrl() {
   return ScriptApp.getService().getUrl() + '?page=guestportal';

@@ -250,9 +250,9 @@ function loadConfig_() {
   const secrets = {
     templateFolderId: scriptProps.getProperty('TEMPLATE_FOLDER_ID'),
     destinationFolderId: scriptProps.getProperty('DESTINATION_FOLDER_ID'),
-    groupEmail: scriptProps.getProperty('GROUP_EMAIL'),
+    groupEmail: scriptProps.getProperty('GROUP_EMAIL') || scriptProps.getProperty('SYSTEM_EMAIL_ALIAS'),
     geminiKey: scriptProps.getProperty('CLO_GEMINI_KEY'),
-    chatWebhook: scriptProps.getProperty('CHAT_WEBHOOK'),
+    chatWebhook: scriptProps.getProperty('CHAT_WEBHOOK') || scriptProps.getProperty('NOTIFICATION_CHAT_WEBHOOK') || scriptProps.getProperty('CHAT_WEBHOOK_URL'),
     calendarId: scriptProps.getProperty('LEAVE_CALENDAR_ID'),
     boardUrl: scriptProps.getProperty('BOARD_URL') || ScriptApp.getService().getUrl()
   };
