@@ -81,7 +81,7 @@
     <script>
         let allActions = [];
         let currentActionId = null;
-        const requestedTask = "<?= typeof requestedTask !== 'undefined' ? requestedTask : '' ?>";
+        const requestedTask = "<?= requestedTask ?>".trim();
 
         window.addEventListener('load', loadActions);
 

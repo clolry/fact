@@ -2747,9 +2747,9 @@ window.QT1D = {
 
   window.onload = () => { 
       if(localStorage.getItem('dark')==='1') toggleDark(); 
-      const requestedTask = "<?= typeof requestedTask !== 'undefined' && requestedTask ? requestedTask : '' ?>".trim();
-      const requestedTab = "<?= typeof requestedTab !== 'undefined' && requestedTab ? requestedTab : '' ?>".trim();
-      window.userAccessLevel = "<?= accessLevel || '' ?>";
+      const requestedTask = "<?= requestedTask ?>".trim();
+      const requestedTab = "<?= requestedTab ?>".trim();
+      window.userAccessLevel = "<?= accessLevel ?>";
       
       try {
           // Use string replacement to avoid parsing errors with unescaped quotes if any
@@ -2761,7 +2761,7 @@ window.QT1D = {
       applySidebarConfig();
       
       boot(() => {
-          if (requestedTask && requestedTask !== 'null' && requestedTask !== 'undefined') {
+          if (requestedTask && requestedTask !== 'null' && requestedTask !== 'undefined' && requestedTask !== '(?:)' && !requestedTask.includes('?')) {
               openForm(requestedTask, requestedTab || 'details');
           }
       }); 
