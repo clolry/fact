@@ -775,39 +775,106 @@ function grantFolderAccessFast_(folderId, identifiers) {
     const validEmails = [...new Set(emails.filter(e => e.includes('@')))];
     if(validEmails.length === 0) return;
     
-    const token = ScriptApp.getOAuthToken();
-    const requests = validEmails.map(email => ({
-        url: `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false`,
-        method: 'post',
-        contentType: 'application/json',
-        headers: { Authorization: "Bearer " + token },
-        payload: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email }),
-        muteHttpExceptions: true
-    }));
-    
+    // 3. Check existing permissions first to prevent duplicate grants and notification spam
+    const alreadyHasAccess = new Set();
     try {
-        const responses = UrlFetchApp.fetchAll(requests);
-        responses.forEach((res, idx) => {
-            const code = res.getResponseCode();
-            if (code >= 400) {
-                console.warn(`Drive API permission grant for ${validEmails[idx]} returned ${code}: ${res.getContentText()}`);
-                // Fallback to DriveApp
-                try {
-                    DriveApp.getFolderById(folderId).addEditor(validEmails[idx]);
-                } catch(fallbackErr) {
-                    console.error(`Fallback addEditor failed for ${validEmails[idx]}: ${fallbackErr.message}`);
-                }
+        if (typeof Drive !== 'undefined' && Drive.Permissions && Drive.Permissions.list) {
+            const permList = Drive.Permissions.list(folderId, {
+                supportsAllDrives: true,
+                fields: 'permissions(id,emailAddress,role)'
+            });
+            if (permList && permList.permissions) {
+                permList.permissions.forEach(p => {
+                    if (p.emailAddress && (p.role === 'writer' || p.role === 'owner' || p.role === 'organizer' || p.role === 'fileOrganizer')) {
+                        alreadyHasAccess.add(p.emailAddress.toLowerCase());
+                    }
+                });
             }
-        });
+        }
     } catch(e) {
-        console.error("Failed to batch grant folder access: " + e.message);
-        // Fallback to DriveApp for each email
+        console.warn("Drive.Permissions.list check failed: " + e.message);
+    }
+
+    // Fallback: check DriveApp editors / owner if alreadyHasAccess is empty
+    if (alreadyHasAccess.size === 0) {
         try {
             const folder = DriveApp.getFolderById(folderId);
-            validEmails.forEach(email => {
-                try { folder.addEditor(email); } catch(err) {}
+            try {
+                const owner = folder.getOwner();
+                if (owner && owner.getEmail()) alreadyHasAccess.add(owner.getEmail().toLowerCase());
+            } catch(e) {}
+            try {
+                folder.getEditors().forEach(u => {
+                    if (u && u.getEmail()) alreadyHasAccess.add(u.getEmail().toLowerCase());
+                });
+            } catch(e) {}
+        } catch(e) {
+            console.warn("DriveApp check existing editors failed: " + e.message);
+        }
+    }
+
+    // Filter out users who already have writer/owner access
+    const toGrant = validEmails.filter(e => !alreadyHasAccess.has(e));
+    if (toGrant.length === 0) {
+        // Everyone already has editor access! No-op: zero API calls, zero notification emails.
+        return;
+    }
+
+    // 4. Grant access silently (sendNotificationEmail: false)
+    const stillNeedFallback = [];
+    toGrant.forEach(email => {
+        let granted = false;
+        try {
+            if (typeof Drive !== 'undefined' && Drive.Permissions && Drive.Permissions.create) {
+                Drive.Permissions.create(
+                    { role: 'writer', type: 'user', emailAddress: email },
+                    folderId,
+                    { sendNotificationEmail: false, supportsAllDrives: true }
+                );
+                granted = true;
+            }
+        } catch(err) {
+            console.warn(`Drive.Permissions.create failed for ${email}: ${err.message}`);
+        }
+        if (!granted) {
+            stillNeedFallback.push(email);
+        }
+    });
+
+    // 5. REST API fallback if Drive.Permissions.create was unavailable
+    if (stillNeedFallback.length > 0) {
+        const token = ScriptApp.getOAuthToken();
+        const requests = stillNeedFallback.map(email => ({
+            url: `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`,
+            method: 'post',
+            contentType: 'application/json',
+            headers: { Authorization: "Bearer " + token },
+            payload: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email }),
+            muteHttpExceptions: true
+        }));
+        
+        try {
+            const responses = UrlFetchApp.fetchAll(requests);
+            responses.forEach((res, idx) => {
+                const code = res.getResponseCode();
+                if (code >= 400) {
+                    console.warn(`Drive REST API permission grant for ${stillNeedFallback[idx]} returned ${code}: ${res.getContentText()}`);
+                    try {
+                        DriveApp.getFolderById(folderId).addEditor(stillNeedFallback[idx]);
+                    } catch(fallbackErr) {
+                        console.error(`DriveApp fallback failed for ${stillNeedFallback[idx]}: ${fallbackErr.message}`);
+                    }
+                }
             });
-        } catch(fallbackAllErr) {}
+        } catch(e) {
+            console.error("Failed to batch grant folder access via UrlFetch: " + e.message);
+            try {
+                const folder = DriveApp.getFolderById(folderId);
+                stillNeedFallback.forEach(email => {
+                    try { folder.addEditor(email); } catch(err) {}
+                });
+            } catch(fallbackAllErr) {}
+        }
     }
 }
 

@@ -2551,12 +2551,13 @@ window.QT1D = {
     }
   }
 
-  function getItemDeepLink(itemId, forGuest) {
+  function getItemDeepLink(itemId, forGuest, tab) {
     const base = (typeof FACT_APP_URL !== 'undefined' && FACT_APP_URL) ? FACT_APP_URL : (window.location.origin + window.location.pathname);
     if (forGuest) {
       return `${base}?page=guestportal&id=${encodeURIComponent(itemId)}`;
     }
-    return `${base}?id=${encodeURIComponent(itemId)}`;
+    const tabParam = (tab && tab !== 'details') ? `&tab=${encodeURIComponent(tab)}` : '';
+    return `${base}?id=${encodeURIComponent(itemId)}${tabParam}`;
   }
 
   function copyItemDeepLink() {
@@ -2565,7 +2566,9 @@ window.QT1D = {
       showToast('No active item to copy link for.', 'warning');
       return;
     }
-    const url = getItemDeepLink(id);
+    const activeTabElem = document.querySelector('#modal-tabs .tab.active');
+    const activeTab = activeTabElem ? (activeTabElem.getAttribute('data-target') || 'details') : 'details';
+    const url = getItemDeepLink(id, false, activeTab);
     copyTextToClipboard(url).then(() => {
       showToast(`🔗 Link copied to clipboard for ${id}`, 'success');
     }).catch(() => {
@@ -2744,7 +2747,15 @@ window.QT1D = {
 
   window.onload = () => { 
       if(localStorage.getItem('dark')==='1') toggleDark(); 
-      const requestedTask = "<?= requestedTask || '' ?>";
+      let requestedTask = "<?= requestedTask || '' ?>";
+      let requestedTab = "<?= typeof requestedTab !== 'undefined' && requestedTab ? requestedTab : '' ?>";
+      if (!requestedTask && window.location && window.location.search) {
+          try {
+              const urlParams = new URLSearchParams(window.location.search);
+              if (urlParams.has('id')) requestedTask = urlParams.get('id');
+              if (urlParams.has('tab')) requestedTab = urlParams.get('tab');
+          } catch(e) {}
+      }
       window.userAccessLevel = "<?= accessLevel || '' ?>";
       
       try {
@@ -2758,7 +2769,7 @@ window.QT1D = {
       
       boot(() => {
           if (requestedTask) {
-              openForm(requestedTask, 'approvals');
+              openForm(requestedTask, requestedTab || 'details');
           }
       }); 
   };

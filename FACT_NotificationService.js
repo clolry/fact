@@ -306,7 +306,7 @@ function sendDeclineNotification_(itemId, itemTitle, declinedBy, notes, steps, p
     
     const subject = `Routing Declined: ${itemId} - ${itemTitle}`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -347,7 +347,7 @@ function sendReturnNotification_(itemId, itemTitle, returnedBy, notes, steps, pr
     
     const subject = `Routing Returned for Revision: ${itemId} - ${itemTitle}`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -385,7 +385,7 @@ function sendUnifiedWorkflowStartNotification_(itemId, itemTitle, workflowSteps,
     if (!allStakeholders || allStakeholders.length === 0) return;
     
     const subject = `${itemTitle} Approval Routing`;
-    const appUrl = ScriptApp.getService().getUrl() + '?id=' + itemId;
+    const appUrl = ScriptApp.getService().getUrl() + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     const timelineHtml = generateRoutingTimelineHtml_(workflowSteps);
     
     let docUrl = primaryDocUrl;
@@ -456,7 +456,7 @@ function sendApprovalActionEmail_(itemId, itemTitle, stepObj, approvers, primary
       ? `${prefix}FYI / Awareness: ${itemId} Approval Routing (${stepObj.role})`
       : `${prefix}Action Required: ${itemId} Approval (${stepObj.role})`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
@@ -581,7 +581,7 @@ function sendWorkflowCompletionNotification_(itemId, itemTitle, owners, primaryD
     
     const subject = `✅ Approval Complete: ${itemId} - ${itemTitle}`;
     const baseUrl = ScriptApp.getService().getUrl();
-    const appUrl = baseUrl + '?id=' + itemId;
+    const appUrl = baseUrl + '?id=' + encodeURIComponent(itemId) + '&tab=approvals';
     
     let docUrl = primaryDocUrl;
     if (docUrl && !docUrl.startsWith('http')) docUrl = 'https://docs.google.com/document/d/' + docUrl;
