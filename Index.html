@@ -2747,15 +2747,8 @@ window.QT1D = {
 
   window.onload = () => { 
       if(localStorage.getItem('dark')==='1') toggleDark(); 
-      let requestedTask = "<?= requestedTask || '' ?>";
-      let requestedTab = "<?= typeof requestedTab !== 'undefined' && requestedTab ? requestedTab : '' ?>";
-      if (!requestedTask && window.location && window.location.search) {
-          try {
-              const urlParams = new URLSearchParams(window.location.search);
-              if (urlParams.has('id')) requestedTask = urlParams.get('id');
-              if (urlParams.has('tab')) requestedTab = urlParams.get('tab');
-          } catch(e) {}
-      }
+      const requestedTask = "<?= typeof requestedTask !== 'undefined' && requestedTask ? requestedTask : '' ?>".trim();
+      const requestedTab = "<?= typeof requestedTab !== 'undefined' && requestedTab ? requestedTab : '' ?>".trim();
       window.userAccessLevel = "<?= accessLevel || '' ?>";
       
       try {
@@ -2768,7 +2761,7 @@ window.QT1D = {
       applySidebarConfig();
       
       boot(() => {
-          if (requestedTask) {
+          if (requestedTask && requestedTask !== 'null' && requestedTask !== 'undefined') {
               openForm(requestedTask, requestedTab || 'details');
           }
       }); 
@@ -3649,7 +3642,7 @@ function enableWeeklyReview() {
                     // Continue opening the form now that we have fresh data
                     _openFormWithData(finalId, targetTab);
                 } else {
-                    showAlert("Item details could not be found.", "Error", "error");
+                    showAlert(`Item details could not be found for ID: ${cleanId}`, "Error", "error");
                 }
             })
             .withFailureHandler(err => {

@@ -186,8 +186,8 @@ function routeRequest_(e, accessLevel) {
     template.workgroup = wg;
     template.sidebarConfig = config.sidebarConfig || '[]';
     template.accessLevel = accessLevel;
-    template.requestedTask = e && e.parameter && e.parameter.id ? e.parameter.id : '';
-    template.requestedTab = e && e.parameter && e.parameter.tab ? e.parameter.tab : '';
+    template.requestedTask = (e && e.parameter && e.parameter.id) ? String(e.parameter.id).trim() : '';
+    template.requestedTab = (e && e.parameter && e.parameter.tab) ? String(e.parameter.tab).trim() : '';
     return template.evaluate()
       .setTitle(`${wg} Kanban Board`);
   } else if (accessLevel === 'GUEST') {
