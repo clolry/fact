@@ -1,0 +1,42 @@
+# CODEOWNERS — FACT
+#
+# Purpose: automatically request review from the right people when
+# deployment-, OAuth-, or environment-sensitive files change.
+# Implements PROJECT_PLAN.md Key Requirement #9 (OAuth Scope Review).
+#
+# NOTE: this is ADVISORY only. Branch protection sets
+# require_code_owner_reviews=false, so these owners are auto-REQUESTED
+# as reviewers but their approval is not hard-required. That is
+# deliberate: hard-requiring it would block an owner's own pull requests.
+#
+# Reviewers (PROJECT_PLAN.md "Team"):
+#   @clolry       — Chris Olry, Project Owner / Lead Developer
+#   @0zelKirkland — Ozel Kirkland, Secondary Developer
+#                   (note: leading character is the DIGIT ZERO, not "O")
+#
+# Listing both means either reviewer can satisfy the auto-request.
+# @0zelKirkland must hold at least "push" (write) access for the
+# auto-request to resolve — see scripts/add-collaborator.sh.
+
+# Default owners for everything not matched below.
+*                           @clolry @0zelKirkland
+
+# --- Deployment and environment configuration: extra scrutiny ---
+# Any change here can alter what is deployed, or where.
+/.github/workflows/         @clolry @0zelKirkland
+/.clasp.json                @clolry @0zelKirkland
+/.claspignore               @clolry @0zelKirkland
+
+# --- Apps Script manifest: OAuth scopes and advanced services ---
+# Changes here can force re-authorization for every user.
+/appsscript.json            @clolry @0zelKirkland
+
+# --- Governance and agent behavior ---
+/PROJECT_PLAN.md            @clolry @0zelKirkland
+/AGENTS.md                  @clolry @0zelKirkland
+/CODEOWNERS                 @clolry @0zelKirkland
+/.github/CODEOWNERS         @clolry @0zelKirkland
+
+# --- Environment bootstrap scripts (seed data, production identifiers) ---
+/FACT_SandboxSetup.js       @clolry @0zelKirkland
+/FACT_FcaSetup.js           @clolry @0zelKirkland

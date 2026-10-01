@@ -1,0 +1,28 @@
+=== FACT collaborator invite — 2026-10-01T14:09:31Z ===
+
+--- preflight: auth ---
+github.com
+  ✓ Logged in to github.com account clolry (keyring)
+  - Active account: true
+  - Git operations protocol: https
+  - Token: gho_************************************
+  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
+
+--- preflight: confirm target account exists ---
+{"created_at":"2026-07-22T16:09:27Z","login":"0zelKirkland","type":"User"}
+
+--- preflight: admin permission on clolry/FACT ---
+admin: true
+
+--- current collaborators (before) ---
+{"admin":true,"login":"clolry","push":true}
+{"admin":false,"login":"0zelKirkland","push":true}
+
+--- INVITE: 0zelKirkland with permission=push ---
+invite: PUT completed (HTTP 201 = invitation created, 204 = already a collaborator)
+
+--- VERIFY: pending invitations ---
+
+=== done ===
+Ozel must ACCEPT the emailed invitation before his access is active.
+Until accepted, CODEOWNERS auto-requests to @0zelKirkland will not resolve.
