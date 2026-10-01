@@ -1,0 +1,43 @@
+# Ignore — FACT
+#
+# Scope note: FACT is a container-bound Google Apps Script project. The .js and
+# .html files at the repository root ARE the deployed application, so almost
+# nothing in the project tree is ignorable. This file exists mainly to keep
+# credentials, OS cruft, and local tooling output out of a PUBLIC repository.
+
+# --- Credentials: never commit (AGENTS.md §4.1) ---
+# clasp writes its OAuth tokens here. Committing this would publish a working
+# credential for all three Apps Script environments.
+.clasprc.json
+.clasp.json.tmp
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# --- Local tooling output from scripts/ ---
+# These transcripts contain `gh auth status` output. The token is masked, but
+# there is no reason to publish them on a public repository.
+scripts/*-result.txt
+
+# --- Node tooling (verification only; FACT has no runtime dependencies) ---
+node_modules/
+npm-debug.log*
+.npm/
+
+# --- OS / editor cruft ---
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# --- Logs and scratch ---
+*.log
+*.tmp
+.cache/
