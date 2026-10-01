@@ -320,3 +320,504 @@ All AI-generated diffs must be reviewed by a human before commit. The human revi
 
    ```bash
    ~/code/FACT/
+
+2. Developer reviews changes locally in VS Code.
+
+3. Developer reviews the diff:
+
+git diff
+
+4. Developer creates or uses a local branch.
+
+5. Developer commits changes to a feature branch.
+
+6. Developer pushes the branch to GitHub.
+
+7. Developer opens a pull request.
+
+8. PR is reviewed by one or more reviewers.
+
+9. After approval, changes are merged into the appropriate branch.
+
+10. GitHub Actions deploys to the appropriate Google Apps Script environment.
+
+### Recommended Branching Model
+FACT should use this branching model:
+
+feature/<short-description>
+        ↓ PR
+sandbox
+        ↓ GitHub Actions deploys to Sandbox
+        ↓ Sandbox validation
+        ↓ PR / approval
+main
+        ↓ GitHub Environment approval
+        ↓ GitHub Actions deploys to PMSC Production and FCA Production
+
+### Branch Roles
+Branch	Purpose	Deployment
+<code>main</code>	Production source of truth	Deploys to PMSC production and FCA production after human approval
+<code>sandbox</code>	Default validation branch	Deploys to Sandbox
+<code>dev</code>	Legacy development branch	May currently deploy to Sandbox, but should be retired or de-emphasized
+<code>feature/*</code>, <code>bugfix/*</code>, <code>chore/*</code>	Local and remote development branches	No direct deployment unless merged to <code>sandbox</code> or <code>main</code>
+
+### Recommended Branch Naming
+Use clear branch names:
+feature/<short-description>
+bugfix/<short-description>
+chore/<short-description>
+docs/<short-description>
+
+Examples:
+feature/fca-dashboard-filters
+bugfix/approval-status-regression
+chore/move-deployment-ids-to-secrets
+docs/update-sandbox-validation-checklist
+
+### Pull Request Policy
+Every code change should be reviewed through a pull request.
+
+### PR Expectations
+Each PR should include:
+
+summary of the change;
+reason for the change;
+affected files/modules;
+testing performed;
+Sandbox validation status, if applicable;
+screenshots for UI changes, if useful;
+notes about OAuth scope, Script Property, deployment, or permission changes;
+known risks or rollback notes.
+
+### Required Extra Review
+Extra review is required for changes to:
+
+appsscript.json;
+.github/workflows/deploy.yml;
+.clasp.json;
+.claspignore;
+Code.js routing or authentication behavior;
+OAuth scopes;
+Apps Script advanced services;
+Gmail, Drive, Calendar, or Groups permissions;
+deployment IDs;
+script IDs;
+Script Properties;
+environment configuration;
+production-facing workflows;
+executive approval routing;
+notification dispatch.
+
+## Deployment Workflow
+### Deployment Principle
+Developers should not run direct local deployments as part of normal development.
+
+Use this rule:
+
+Developers must not run clasp push or clasp deploy from local machines as part of normal development. Sandbox and production deployments are performed through GitHub Actions. Any exception requires explicit approval and must be documented.
+
+### Current Workflow
+The current GitHub Actions workflow is:
+.github/workflows/deploy.yml
+
+The existing workflow:
+
+installs Node.js 20;
+installs @google/clasp;
+writes CLASPRC_JSON to ~/.clasprc.json;
+configures .clasp.json;
+runs clasp push --force;
+runs clasp deploy;
+deploys sandbox and dev branches to Sandbox;
+deploys main to both PMSC production and FCA production.
+
+### Target Workflow
+The target governed workflow should be:
+Source Branch	Environment	Deployment Behavior
+<code>sandbox</code>	Sandbox	Automatic deployment after merge/push to <code>sandbox</code>
+<code>dev</code>	Sandbox	Legacy only; retire or remove from deployment trigger when no longer needed
+<code>main</code>	PMSC Production	Deploy only after explicit human approval
+<code>main</code>	FCA Production	Deploy only after explicit human approval
+
+### Production Approval
+Production deployments must require explicit human approval.
+
+Preferred implementation:
+
+Use GitHub Environments:
+
+sandbox
+pmsc-production
+fca-production
+Configure required reviewers for:
+
+pmsc-production
+fca-production
+Store environment-specific values in GitHub Environment Secrets.
+
+Require successful checks before deployment.
+
+Deploy PMSC production and FCA production together from main unless an approved future process separates them.
+
+## GitHub Secrets and Environment Configuration
+### Current State
+The existing workflow contains Apps Script project and deployment identifiers inline in YAML. This works operationally, but the target governance model is to move environment-specific identifiers out of the workflow body and into GitHub Secrets or GitHub Environment Secrets.
+
+Recommended GitHub Environment Secrets
+Use environment-specific secrets like the following:
+Environment	Secret Name	Purpose
+Repository or each environment	<code>CLASPRC_JSON</code>	clasp authentication JSON
+<code>sandbox</code>	<code>GAS_SCRIPT_ID</code>	Sandbox Apps Script project ID
+<code>sandbox</code>	<code>GAS_DEPLOYMENT_ID</code>	Sandbox web app deployment ID
+<code>pmsc-production</code>	<code>GAS_SCRIPT_ID</code>	PMSC production Apps Script project ID
+<code>pmsc-production</code>	<code>GAS_DEPLOYMENT_ID</code>	PMSC production web app deployment ID
+<code>fca-production</code>	<code>GAS_SCRIPT_ID</code>	FCA production Apps Script project ID
+<code>fca-production</code>	<code>GAS_DEPLOYMENT_ID</code>	FCA production web app deployment ID
+
+### Recommended .clasp.json Handling
+Target state:
+
+generate .clasp.json dynamically inside GitHub Actions;
+do not rely on manually edited environment-specific .clasp.json;
+avoid committing secrets or environment-specific credentials;
+if .clasp.json remains committed, confirm it points only to a non-sensitive/default development target and cannot accidentally deploy production.
+Recommended generated format:
+
+{
+  "scriptId": "${GAS_SCRIPT_ID}",
+  "rootDir": "."
+}
+
+## Testing and Validation
+### Current Automated Test Status
+Automated tests are not currently known to exist for FACT.
+
+Until automated tests are added, validation is primarily:
+
+code review;
+local inspection;
+manual Sandbox validation;
+production smoke checks after approved deployment.
+Recommended Local Validation
+Before opening a pull request:
+cd ~/code/FACT
+git status
+git diff
+
+Review:
+
+changed files;
+syntax risk;
+Apps Script compatibility;
+accidental credential exposure;
+accidental production identifier changes;
+changes to OAuth scopes;
+changes to deployment files;
+user-visible behavior changes.
+
+### Recommended Sandbox Validation Checklist
+After deployment to Sandbox, validate:
+
+ FACT web app loads successfully.
+ User authentication/session behavior works as expected.
+ Main dashboard loads.
+ Existing task/action item records display correctly.
+ User can create an action item in Sandbox.
+ User can edit an action item in Sandbox.
+ Workgroup assignment behavior works.
+ Due dates and status fields behave correctly.
+ Executive review or approval workflow works for a test item.
+ Notes/comments/audit history work as expected.
+ Notifications behave correctly in Sandbox, if enabled.
+ Drive file/folder behavior works with test data.
+ Calendar-related behavior works, if affected by the change.
+ Reports or dashboards load, if affected by the change.
+ No production data is modified during Sandbox validation.
+ No unexpected OAuth consent or permission changes occur.
+ Browser console does not show unexpected errors.
+ Apps Script execution logs do not show unexpected errors.
+ Section 508-sensitive UI changes are keyboard-accessible and readable.
+
+### Recommended Automated Smoke Tests
+Add lightweight tests or checks over time:
+
+manifest validation for appsscript.json;
+static scan for forbidden secrets or IDs;
+syntax checking where feasible;
+basic Apps Script-compatible linting;
+smoke checklist encoded in PR template;
+optional test harness for pure JavaScript business logic.
+
+### Security and Privacy Guardrails
+No secrets in source code
+API keys, clasp tokens, Chat webhooks, deployment credentials, and service credentials must never be committed.
+
+Use approved configuration stores
+Environment-specific configuration should live in:
+
+Google Apps Script Script Properties;
+GitHub Repository Secrets;
+GitHub Environment Secrets.
+Protect Chat webhooks
+Chat webhook URLs are secrets and must not be committed, logged, or pasted into prompts.
+
+Protect API keys
+CLO_GEMINI_KEY, CLO_USAi_KEY, USAI_API_KEY, and similar values are secrets.
+
+Protect production identifiers
+Script IDs and deployment IDs should be treated as environment configuration and moved to GitHub Secrets or GitHub Environments where feasible.
+
+Review OAuth scope changes
+Any appsscript.json scope change must receive explicit review.
+
+Use Sandbox for validation
+Do not test risky behavior directly in production.
+
+Avoid sensitive prompt content
+Do not paste sensitive FACT data into AI prompts unless explicitly approved and handled under applicable policy.
+
+Preserve auditability
+Use GitHub history, PR review, and GitHub Actions logs as the source of truth for changes and deployments.
+
+### Required Script Properties
+FACT uses numerous Google Apps Script Script Properties. Some may be outdated or unused. They should be audited before deletion or renaming.
+
+Do not place property values in source code or documentation unless explicitly approved.
+This table lists property names and expected purpose only.
+Key	Purpose / Notes
+<code>CHAT_WEBHOOK</code>	Google Chat incoming webhook for notifications. Secret.
+<code>CLO_GEMINI_KEY</code>	Gemini API key or related AI integration key. Secret.
+<code>CLO_USAi_KEY</code>	USAi-related key. Secret.
+<code>DESTINATION_FOLDER_ID</code>	Destination/root Drive folder for generated or copied FACT files.
+<code>GLOBAL_ID</code>	Global ID or counter value used by FACT.
+<code>GROUP_EMAIL</code>	Workgroup or system group email used for notifications/reply-to behavior.
+<code>ID_COUNTER</code>	Counter for generated IDs.
+<code>LEAVE_CALENDAR_ID</code>	Calendar ID used by related scheduling/availability features, if still active.
+<code>NOTIFCATION_CHAT_WEBHOOK</code>	Chat webhook property with apparent spelling typo. Audit before changing because code may depend on exact name. Secret.
+<code>REPORT_LOGO_FILE_ID</code>	Drive file ID for report logo or branding.
+<code>SYSTEM_EMAIL_ALIAS</code>	Authorized sender alias for system-generated email, if used.
+<code>TEMPLATE_FOLDER_ID</code>	Drive folder containing templates.
+<code>TODAY_WHITEBOARD_JSON</code>	JSON/configuration for today/whiteboard behavior, if still active.
+<code>USAI_API_KEY</code>	USAi API key. Secret.
+<code>USAI_BASE_URL</code>	USAi API base URL.
+<code>USAI_DEFAULT_MODEL</code>	Default USAi model name/configuration.
+<code>adminUserList</code>	Admin user list. May contain emails; treat as sensitive internal config.
+<code>intakeLastChecked</code>	Timestamp or marker for intake polling.
+<code>sharedUserList</code>	Shared user list. May contain emails; treat as sensitive internal config.
+
+### Script Property Audit Recommendation
+Create a follow-up issue or task to classify each Script Property as:
+Classification	Meaning
+Active required	Used by current production code
+Active optional	Used only when feature is enabled
+Environment-specific	Must differ by Sandbox/PMSC/FCA
+Secret	Must never be logged or committed
+Deprecated	No longer used but retained temporarily
+Unknown	Requires code search and runtime validation
+
+### Repository File Structure & Architecture Map
+Current repository structure is root-based:
+FACT/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml
+├── .clasp.json
+├── appsscript.json
+├── Code.js
+├── FACT_Bootstrap.js
+├── FACT_DataService.js
+├── FACT_DocSignature.js
+├── FACT_DriveService.js
+├── FACT_Export.js
+├── FACT_FcaSetup.js
+├── FACT_Federation.js
+├── FACT_IntakeUI.js
+├── FACT_NotesLog.js
+├── FACT_NotificationService.js
+├── FACT_SandboxSetup.js
+├── FACT_Workflow.js
+├── FACT_WorkflowEngine.js
+├── FACT_WorkflowEngine_backup.js
+├── GuestPortal.html
+├── Index.html
+├── IntakeForm.html
+├── Lib_ApprovalWorkflowBuilder.html
+├── Lib_Chart.html
+├── Lib_FullCalendar.html
+├── Lib_Sortable.html
+├── Lib_WorkflowBuilder.html
+├── ReportBuilder.html
+├── PROJECT_PLAN.md
+└── docs/
+    ├── docs_getting_started.md
+    ├── docs_technical.md
+    └── docs_user_guide.md
+
+### Module Map
+File	Purpose
+<code>Code.js</code>	Main Apps Script entry point, web app routing, server-side functions.
+<code>FACT_Bootstrap.js</code>	Setup/bootstrap logic, initialization, triggers, or environment preparation.
+<code>FACT_DataService.js</code>	Google Sheets data access and CRUD service layer.
+<code>FACT_DocSignature.js</code>	Document signature, watermark, or approval-document support.
+<code>FACT_DriveService.js</code>	Google Drive folder/file operations and permissions.
+<code>FACT_Export.js</code>	Export/report generation support.
+<code>FACT_FcaSetup.js</code>	FCA-specific setup/provisioning logic.
+<code>FACT_Federation.js</code>	Federation or hub-and-spoke coordination logic.
+<code>FACT_IntakeUI.js</code>	Intake workflow/user interface support.
+<code>FACT_NotesLog.js</code>	Notes, logging, audit trail, or history support.
+<code>FACT_NotificationService.js</code>	Email, Chat, and notification dispatch.
+<code>FACT_SandboxSetup.js</code>	Sandbox setup/provisioning logic.
+<code>FACT_Workflow.js</code>	High-level workflow orchestration.
+<code>FACT_WorkflowEngine.js</code>	Workflow engine logic for approvals/review/routing.
+<code>FACT_WorkflowEngine_backup.js</code>	Backup/legacy workflow engine file. Review before modifying or deleting.
+<code>Index.html</code>	Main FACT web application UI.
+<code>GuestPortal.html</code>	Guest or limited-access portal UI.
+<code>IntakeForm.html</code>	Intake form UI.
+<code>ReportBuilder.html</code>	Reporting UI.
+<code>Lib_ApprovalWorkflowBuilder.html</code>	Approval workflow builder UI/library.
+<code>Lib_WorkflowBuilder.html</code>	Workflow builder UI/library.
+<code>Lib_Chart.html</code>	Chart library wrapper/bundled client asset.
+<code>Lib_FullCalendar.html</code>	FullCalendar library wrapper/bundled client asset.
+<code>Lib_Sortable.html</code>	SortableJS library wrapper/bundled client asset.
+<code>docs/docs_getting_started.md</code>	User/developer getting started documentation.
+<code>docs/docs_technical.md</code>	Technical documentation.
+<code>docs/docs_user_guide.md</code>	User guide.
+
+## Deployment Governance Recommendations
+The existing workflow is functional, but FACT should adopt a stronger deployment governance model.
+
+### Recommended Near-Term Changes
+Move script IDs and deployment IDs to secrets
+
+Use GitHub Environment Secrets for Sandbox, PMSC production, and FCA production.
+Keep workflow logic generic.
+Configure GitHub Environments
+
+sandbox
+pmsc-production
+fca-production
+Require reviewers for production environments
+
+Require explicit approval before production deployment jobs run.
+Retire or de-emphasize dev
+
+Prefer feature branches and PRs into sandbox.
+Remove dev from deployment triggers after transition, if no longer needed.
+Add branch protection
+
+Protect main.
+Require PR review.
+Require successful checks.
+Consider protecting sandbox as the validation branch.
+Add PR template
+
+Include testing, Sandbox validation, OAuth scope review, and deployment impact fields.
+Add smoke checks
+
+Start with documentation/checklist-based validation.
+Add automated checks where feasible.
+
+## Recommended Release Process
+### Sandbox Release
+Create feature branch from sandbox or current agreed base.
+Make local changes in ~/code/FACT/.
+Review in VS Code.
+Review git diff.
+Commit changes.
+Push feature branch.
+Open PR into sandbox.
+Obtain review.
+Merge into sandbox.
+GitHub Actions deploys to Sandbox.
+Complete Sandbox validation checklist.
+Record validation results in the PR or release notes.
+### Production Release
+Confirm Sandbox validation is complete.
+Open PR from sandbox to main, or otherwise promote the approved commit to main.
+Review production impact.
+Confirm no unreviewed OAuth scope, deployment, or Script Property changes.
+Approve PR.
+Merge to main.
+GitHub Actions starts production deployment.
+Required reviewers approve GitHub production environments.
+GitHub Actions deploys to PMSC production and FCA production.
+Run production smoke checks.
+Document deployment outcome.
+
+### Production Smoke Check
+After production deployment:
+
+ PMSC production web app loads.
+ FCA production web app loads.
+ Main dashboard loads.
+ Existing records display.
+ No immediate Apps Script runtime errors.
+ Notifications are not misdirected.
+ No Sandbox configuration appears in production.
+ No production configuration appears in Sandbox.
+ Critical workflow path still works.
+
+### Rollback Guidance
+If a production deployment causes issues:
+
+Stop additional deployments.
+Identify the merged PR or commit that introduced the issue.
+Assess whether a configuration rollback or code rollback is appropriate.
+Preferred rollback options:
+revert the PR and redeploy through GitHub Actions;
+redeploy a previously known-good commit through the approved GitHub Actions process;
+use Apps Script deployment/version history only if needed and approved.
+Validate rollback in Sandbox if time permits.
+Deploy rollback to production through approved GitHub Actions path.
+Run production smoke checks.
+Document the incident, rollback commit, and follow-up actions.
+Direct local clasp push should not be used for rollback except under explicit emergency approval and with documentation.
+
+## Immediate Engineering Roadmap
+Stabilize Existing Production Behavior
+
+Prioritize regression prevention.
+Avoid broad refactors.
+Document known production-sensitive workflows.
+Establish GitHub Actions Deployment Governance
+
+Add GitHub Environments.
+Require production reviewers.
+Require checks before production deploy.
+Move Deployment Identifiers to Secrets
+
+Move script IDs and deployment IDs from inline workflow YAML to GitHub Secrets or GitHub Environment Secrets.
+Keep .clasp.json dynamically generated in CI/CD.
+Retire or Reduce Use of dev
+
+Confirm whether dev is still needed.
+Prefer feature branches and PRs into sandbox.
+Remove dev from automatic deployment triggers after approval.
+Create Manual Sandbox Validation Checklist
+
+Add checklist to documentation and/or PR template.
+Require completion before production promotion.
+Add Automated Smoke Tests
+
+Start with static checks and manifest validation.
+Add unit tests for pure JavaScript logic where feasible.
+Add CI checks that can run without Apps Script credentials.
+Support FCA DAC Rollout
+
+Validate FCA production environment configuration.
+Confirm FCA-specific Script Properties, notifications, Drive folders, templates, groups, and permissions.
+Ensure PMSC and FCA production do not cross-contaminate data or configuration.
+Improve Executive Review Workflow
+
+Stabilize review/approval flows.
+Improve routing clarity.
+Improve auditability and error handling.
+Improve Reporting and Dashboarding
+
+Improve executive visibility.
+Validate report generation.
+Ensure dashboards work across PMSC and FCA contexts.
+Audit Script Properties
+
+Identify active, deprecated, environment-specific, and secret properties.
+Remove or retire unused properties only after review.
