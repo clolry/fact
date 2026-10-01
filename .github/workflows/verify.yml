@@ -1,0 +1,42 @@
+name: verify
+
+# Pull-request verification for FACT.
+#
+# This workflow CANNOT deploy. It has no secrets, no clasp, and read-only
+# token permissions. Deployment lives entirely in deploy.yml, which runs on
+# push to sandbox/main. Keeping the two separate means a verification change
+# can never alter deployment behavior.
+#
+# The job is named "verify" deliberately: that string is the status-check
+# context promoted to REQUIRED on main in Phase 2 (issue #14). Renaming the
+# job silently breaks that branch-protection rule.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - sandbox
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax, secret, and manifest checks
+        run: sh scripts/check.sh

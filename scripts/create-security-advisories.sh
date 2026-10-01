@@ -49,11 +49,24 @@ echo
 file_advisory() {
   echo "----------------------------------------"
   echo "CREATING: $1"
+  # The API requires a non-empty `vulnerabilities` array. FACT is a Google
+  # Apps Script application, not a published package, so ecosystem "other"
+  # is used and version-range fields are left null. These advisories are
+  # being used as a PRIVATE TRACKER, not for CVE submission.
   jq -n --arg s "$1" --arg d "$3" --arg sev "$2" \
-    '{summary:$s, description:$d, severity:$sev}' \
+    '{summary:$s,
+      description:$d,
+      severity:$sev,
+      vulnerabilities:[
+        {package:{ecosystem:"other", name:"FACT (Google Apps Script)"},
+         vulnerable_version_range:null,
+         patched_versions:null,
+         vulnerable_functions:null}
+      ]}' \
   | gh api -X POST "/repos/$REPO/security-advisories" \
       -H "Accept: application/vnd.github+json" --input - \
-      --jq '{ghsa_id, state, html_url}' 2>&1
+      --jq '{ghsa_id, state, html_url}' 2>&1 \
+    || echo "  ^^ FAILED — see error above. Remaining advisories will still be attempted."
   echo
 }
 
