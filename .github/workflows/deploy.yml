@@ -1,48 +1,240 @@
 name: Deploy to Google Apps Script
 
+# HARDENED DEPLOYMENT WORKFLOW — Increment 2
+#
+# Changes from the previous version, and why:
+#   1. environment:          gates each deploy behind a GitHub Environment.
+#                            pmsc-production and fca-production have required
+#                            reviewers, so a merge to main now PAUSES and waits
+#                            for a human to approve. This closes the "reviewed
+#                            before deploy, but not approved to deploy" gap.
+#   2. per-env secrets:      script and deployment IDs come from environment
+#                            secrets, not workflow source.
+#   3. separate jobs:        PMSC and FCA are distinct jobs. FCA depends on
+#                            PMSC succeeding, so a PMSC failure leaves BOTH
+#                            environments on the previous version (fail
+#                            closed) rather than deploying only one.
+#   4. secret handling:      CLASPRC_JSON is passed via env: and written with
+#                            printf under umask 077, so it never appears on a
+#                            shell command line. Removed in an always() step.
+#   5. .clasp.json patching: jq patches ONLY scriptId, preserving
+#                            scriptExtensions / htmlExtensions /
+#                            jsonExtensions / filePushOrder. The old version
+#                            overwrote the whole file, so CI pushed under
+#                            different rules than a local push. (issue #12)
+#   6. clasp pinned:         3.4.1. Determined from evidence, not guessed:
+#                            no @google/clasp release since 2026-08-28, so
+#                            every green run from 2026-09-18 onward — including
+#                            production runs #37 and #39 — used 3.4.1.
+#                            (issue #11)
+#   7. actions pinned:       SHA-pinned instead of floating v4 tags.
+#   8. permissions:          contents: read only.
+#   9. concurrency:          one deploy per environment at a time; never
+#                            cancels an in-flight production deploy.
+#  10. dev removed:          dev no longer deploys to Sandbox. (issue #13)
+#  11. fail-closed guards:   a missing secret aborts loudly rather than
+#                            deploying to an unintended target.
+#
+# NOTE ON ATOMICITY: Apps Script offers no atomic multi-project deploy. If
+# PMSC succeeds and FCA then fails, the two production environments diverge.
+# That window cannot be eliminated; separate jobs at least make FCA
+# independently re-runnable without re-pushing to PMSC.
+
 on:
   push:
-    branches: [ "main", "sandbox", "dev" ]
+    branches:
+      - main
+      - sandbox
+
+permissions:
+  contents: read
+
+env:
+  # Pinned deliberately IN THE WORKFLOW, not as a secret or variable: pinning a
+  # dependency version is a supply-chain control whose value comes from being
+  # visible in a reviewed diff. Changing it must require a pull request.
+  CLASP_VERSION: "3.4.1"
 
 jobs:
-  deploy:
+  # ---------------------------------------------------------------- Sandbox
+  deploy-sandbox:
+    name: Deploy to Sandbox
+    if: github.ref == 'refs/heads/sandbox'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: sandbox
+    concurrency:
+      group: deploy-sandbox
+      cancel-in-progress: false
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
-          
-      - name: Install Clasp
-        run: npm install -g @google/clasp
-        
-      - name: Authenticate Clasp
+
+      - name: Install clasp (pinned)
+        run: npm install -g "@google/clasp@${CLASP_VERSION}"
+
+      - name: Authenticate clasp
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
-          
-      - name: Configure Sandbox Deployment
-        if: github.ref == 'refs/heads/sandbox' || github.ref == 'refs/heads/dev'
+          set -eu
+          if [ -z "${CLASPRC_JSON}" ]; then
+            echo "::error::CLASPRC_JSON is not set"; exit 1
+          fi
+          umask 077
+          printf '%s' "${CLASPRC_JSON}" > "${HOME}/.clasprc.json"
+
+      - name: Target Sandbox script
+        env:
+          SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
         run: |
-          echo 'Deploying to Sandbox Environment...'
-          echo '{"scriptId":"1UFy82UYrg9D_hmcU78bTU61RrECCvxUumiBE-VsKtAoSSluGxY-0BW_x","rootDir":"."}' > .clasp.json
+          set -eu
+          if [ -z "${SCRIPT_ID}" ]; then
+            echo "::error::SCRIPT_ID is not set for environment 'sandbox'"; exit 1
+          fi
+          jq --arg id "${SCRIPT_ID}" '.scriptId = $id' .clasp.json > .clasp.json.tmp
+          mv .clasp.json.tmp .clasp.json
+
+      - name: Push and deploy
+        env:
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          set -eu
+          if [ -z "${DEPLOYMENT_ID}" ]; then
+            echo "::error::DEPLOYMENT_ID is not set for environment 'sandbox'"; exit 1
+          fi
           clasp push --force
-          clasp deploy -i AKfycbx9e0QpqXduA2ylCVUDUOHopMzEH9qyf-y6JbpkVoEGi63QkpP_46InJ83WFqmQh74K -d "Auto-deploy via GitHub Actions"
-          
-      - name: Configure PMSC Production Deployment
-        if: github.ref == 'refs/heads/main'
+          clasp deploy -i "${DEPLOYMENT_ID}" \
+            -d "GitHub Actions ${GITHUB_REF_NAME}@${GITHUB_SHA}"
+
+      - name: Remove clasp credentials
+        if: always()
+        run: rm -f "${HOME}/.clasprc.json"
+
+  # -------------------------------------------------------- PMSC Production
+  deploy-pmsc-production:
+    name: Deploy to PMSC Production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pmsc-production   # required reviewers gate this job
+    concurrency:
+      group: deploy-pmsc-production
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp (pinned)
+        run: npm install -g "@google/clasp@${CLASP_VERSION}"
+
+      - name: Authenticate clasp
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          echo 'Deploying to PMSC Production...'
-          echo '{"scriptId":"1ltCzOYebrPSRE53UkpALyMJajtoLprGqEn8f2qYsHxV2Ue5W9StUfOXl","rootDir":"."}' > .clasp.json
-          clasp push --force
-          clasp deploy -i AKfycby5mvn-TjDwksmLdr1jAfMVsbxkMzE0F25jrl5fgGOLDQPLccSXah-uOLjf3werlGSdrg -d "Auto-deploy via GitHub Actions"
-          
-      - name: Configure FCA Production Deployment
-        if: github.ref == 'refs/heads/main'
+          set -eu
+          if [ -z "${CLASPRC_JSON}" ]; then
+            echo "::error::CLASPRC_JSON is not set"; exit 1
+          fi
+          umask 077
+          printf '%s' "${CLASPRC_JSON}" > "${HOME}/.clasprc.json"
+
+      - name: Target PMSC Production script
+        env:
+          SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
         run: |
-          echo 'Deploying to FCA Production...'
-          echo '{"scriptId":"1N6Cyyg1uFKD0VBdozcLJqZlWhP_9P0MsjgcAvV6iC-FB6wyiYL-LVppC","rootDir":"."}' > .clasp.json
+          set -eu
+          if [ -z "${SCRIPT_ID}" ]; then
+            echo "::error::SCRIPT_ID is not set for environment 'pmsc-production'"; exit 1
+          fi
+          jq --arg id "${SCRIPT_ID}" '.scriptId = $id' .clasp.json > .clasp.json.tmp
+          mv .clasp.json.tmp .clasp.json
+
+      - name: Push and deploy
+        env:
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          set -eu
+          if [ -z "${DEPLOYMENT_ID}" ]; then
+            echo "::error::DEPLOYMENT_ID is not set for environment 'pmsc-production'"; exit 1
+          fi
           clasp push --force
-          clasp deploy -i AKfycbwuyAVv_wgqDtxyeW9C2gllN6juiUwek_ssQTEvsfFcQsh8CihKq3J7AVV6NhsQ8BHpmw -d "Auto-deploy via GitHub Actions"
+          clasp deploy -i "${DEPLOYMENT_ID}" \
+            -d "GitHub Actions ${GITHUB_REF_NAME}@${GITHUB_SHA}"
+
+      - name: Remove clasp credentials
+        if: always()
+        run: rm -f "${HOME}/.clasprc.json"
+
+  # --------------------------------------------------------- FCA Production
+  # needs: deploy-pmsc-production makes this FAIL CLOSED. If PMSC fails, FCA
+  # never runs and both environments stay on the previous version.
+  deploy-fca-production:
+    name: Deploy to FCA Production
+    needs: deploy-pmsc-production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: fca-production    # required reviewers gate this job
+    concurrency:
+      group: deploy-fca-production
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp (pinned)
+        run: npm install -g "@google/clasp@${CLASP_VERSION}"
+
+      - name: Authenticate clasp
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          set -eu
+          if [ -z "${CLASPRC_JSON}" ]; then
+            echo "::error::CLASPRC_JSON is not set"; exit 1
+          fi
+          umask 077
+          printf '%s' "${CLASPRC_JSON}" > "${HOME}/.clasprc.json"
+
+      - name: Target FCA Production script
+        env:
+          SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
+        run: |
+          set -eu
+          if [ -z "${SCRIPT_ID}" ]; then
+            echo "::error::SCRIPT_ID is not set for environment 'fca-production'"; exit 1
+          fi
+          jq --arg id "${SCRIPT_ID}" '.scriptId = $id' .clasp.json > .clasp.json.tmp
+          mv .clasp.json.tmp .clasp.json
+
+      - name: Push and deploy
+        env:
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          set -eu
+          if [ -z "${DEPLOYMENT_ID}" ]; then
+            echo "::error::DEPLOYMENT_ID is not set for environment 'fca-production'"; exit 1
+          fi
+          clasp push --force
+          clasp deploy -i "${DEPLOYMENT_ID}" \
+            -d "GitHub Actions ${GITHUB_REF_NAME}@${GITHUB_SHA}"
+
+      - name: Remove clasp credentials
+        if: always()
+        run: rm -f "${HOME}/.clasprc.json"

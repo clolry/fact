@@ -20,6 +20,7 @@
 # These transcripts contain `gh auth status` output. The token is masked, but
 # there is no reason to publish them on a public repository.
 scripts/*-result.txt
+*-result.txt
 
 # --- Node tooling (verification only; FACT has no runtime dependencies) ---
 node_modules/
