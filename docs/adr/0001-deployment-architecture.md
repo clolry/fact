@@ -12,6 +12,11 @@ nist_controls: ["CM-2", "CM-3", "CM-5", "AC-6", "SR-3"]
 - **Status:** Accepted (documents existing state; gaps tracked separately)
 - **Date:** 2026-10-01
 - **Deciders:** Chris Olry (Project Owner), Ozel Kirkland (Secondary Developer)
+- **Amended by:** [ADR-0002](./0002-deployment-hardening.md) (2026-10-05) —
+  closes the approval-gate, identifier, pinning, and config-divergence gaps
+  recorded below. This ADR is retained unchanged as the **baseline**: it
+  describes the pipeline as it stood before hardening, which is what a future
+  reader needs in order to understand what ADR-0002 changed and why.
 
 ## Context and problem statement
 
@@ -41,6 +46,9 @@ The repository root *is* the deployed application: every `.js` and `.html`
 file at the root is pushed verbatim.
 
 ### Environments
+
+> **Historical.** The "not enforced" below describes the state on 2026-10-01.
+> Production approval is enforced as of ADR-0002. See the Follow-up table.
 
 | Environment | Source branch | Approval | Purpose |
 |---|---|---|---|
@@ -140,11 +148,27 @@ invisible to git.
 
 ## Follow-up
 
-ADR-0002 will record the deployment-hardening decision: GitHub Environments
-with required reviewers, identifiers moved to per-environment secrets, PMSC
-and FCA split into separate fail-closed jobs, secrets passed via `env:` rather
-than shell interpolation, concurrency groups, and pinned tooling.
+**Superseded by ADR-0002 (2026-10-05).** The items below were open when this
+ADR was written. Current status:
 
-Related: issues #11, #12, #13, #14; private security advisories covering the
-approval gate, `.clasp.json` targeting production, OAuth scope pinning, and
-the `USER_DEPLOYING` authorization model.
+| Gap recorded above | Status |
+|---|---|
+| Production deploys not gated | **Closed** — GitHub Environments with required reviewers, `prevent_self_review` |
+| PMSC and FCA share one job | **Closed** — separate jobs, FCA `needs:` PMSC |
+| Identifiers in workflow source | **Closed** — per-environment secrets (history remains public) |
+| Tooling unpinned (#11) | **Closed** — `@google/clasp` pinned to 3.4.1 |
+| CI/local clasp config divergence (#12) | **Closed** — `jq` patches only `.scriptId` |
+| `dev` still deploys (#13) | **Closed** — trigger removed |
+| No automated tests | **Open** — `check.sh` covers syntax and secrets only |
+| Triggers lost on project recreation | **Open** — manual re-initialization |
+| No `.claspignore` | **Open** — untidy, harmless |
+
+ADR-0002 records the deployment-hardening decision: GitHub Environments with
+required reviewers, identifiers moved to per-environment secrets, PMSC and FCA
+split into separate fail-closed jobs, secrets passed via `env:` rather than
+shell interpolation, concurrency groups, and pinned tooling.
+
+Related: issues #11, #12, #13 (closed by ADR-0002), #14 (closed);
+private security advisories covering the approval gate, `.clasp.json`
+targeting production, OAuth scope pinning, and the `USER_DEPLOYING`
+authorization model.

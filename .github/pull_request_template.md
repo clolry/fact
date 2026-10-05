@@ -84,8 +84,15 @@ A human has reviewed the full diff and takes ownership of this change.
 
 ### Reviewer notes
 
-**This PR targets `main`?** Then merging it is a **production release to both
-PMSC and FCA**. Deployment approval is not yet enforced in CI.
+**This PR targets `main`?** Then merging it starts a **production release to
+both PMSC and FCA** — but it does not complete one. Each production deploy
+pauses in the **Actions** tab for reviewer approval ("Review deployments" →
+select environment → **Approve and deploy**). PMSC and FCA are approved
+separately, and FCA only runs if PMSC succeeded.
+
+**Whoever merges cannot approve the deploy.** `prevent_self_review` is on, so
+the *other* developer must approve each production environment. See
+AGENTS.md §2.
 
 **How to approve:** open the **Files changed** tab → **Review changes** →
 **Approve** → **Submit review**. Do *not* click "Close pull request" — that
