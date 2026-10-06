@@ -114,3 +114,31 @@ FACT implements a role-based access control (RBAC) system verified against the a
 - **Authentication:** Handled natively by Google Workspace. Users must be logged into a valid `@gsa.gov` account.
 - **Authorization:** `Code.js` checks the user's email against an Admin/Exec list before rendering specific pages or returning data.
 - **Data Exposure:** The SPA only receives data from the backend that the user is authorized to view. The raw Google Sheet should be restricted to "View Only" or completely hidden from end-users to prevent direct data tampering.
+
+### Document Access During Approval Routing
+
+When an item with a `Primary_Doc_ID` is routed for approval,
+`shareDocWithParticipants_` (`FACT_WorkflowEngine.js`) grants **editor
+(`writer`)** access on that document to every participant in the chain — the
+owner, the assigned user, each step's approvers, and **FYI / awareness
+recipients**.
+
+**FYI recipients receiving editor rather than commenter access is an
+intentional decision, not an oversight.** All participants are already
+authorized on the item, the access level matches the folder sharing already
+applied at record save, and a uniform level avoids a second class of
+permission to reason about. Anyone tempted to "tighten" FYI access to
+commenter should treat that as a behavior change requiring its own decision,
+not a cleanup.
+
+Sharing is attempted at five points — workflow start, step activation,
+delegation, delayed start, and admin reminder — because an approver can first
+become relevant at any of them (a delegate, in particular, is unknown until an
+admin reassigns). It runs **before** each email so an Approve button never
+arrives ahead of access.
+
+Sharing failure is **non-fatal by design**: the document may be owned outside
+the organization or sit on a Shared Drive the deploying account cannot
+administer, and that must not block an approval. On failure a note is written
+to the item naming who still lacks access.
+
