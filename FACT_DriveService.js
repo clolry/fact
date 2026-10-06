@@ -728,13 +728,24 @@ function processAsyncTemplateCopy_(e) {
 }
 
 /**
- * Grants editor access to a Drive folder for a list of names/emails using parallel batch processing.
- * Supports "First Last <email@gsa.gov>", plain emails, and comma-separated lists.
+ * Resolves a list of identifiers to clean, unique, lowercase email addresses.
+ *
+ * Accepts "First Last <email@gsa.gov>", bare emails, comma-separated lists, and
+ * plain display names (looked up against the Stakeholders sheet).
+ *
+ * Extracted from grantFolderAccessFast_ so that document sharing uses the exact
+ * same resolution. The approval workflow previously hand-rolled its own and
+ * passed "Name <email>" straight to the Drive API as an emailAddress, which the
+ * API rejects — see grantDocAccessFast_.
+ *
+ * @param {Array<string>} identifiers Raw identifier strings.
+ * @returns {Array<string>} Unique lowercase emails. Empty array if none resolve.
+ * @private
  */
-function grantFolderAccessFast_(folderId, identifiers) {
-    if(!identifiers || identifiers.length === 0 || !folderId) return;
-    
-    // 1. Get Stakeholders Map
+function resolveIdentifiersToEmails_(identifiers) {
+    if (!identifiers || identifiers.length === 0) return [];
+
+    // 1. Get Stakeholders Map (display name -> email) for plain-name identifiers
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let stkSh = ss.getSheetByName('Stakeholders');
     const emailMap = new Map();
@@ -772,8 +783,68 @@ function grantFolderAccessFast_(folderId, identifiers) {
         }
     });
 
-    const validEmails = [...new Set(emails.filter(e => e.includes('@')))];
-    if(validEmails.length === 0) return;
+    return [...new Set(emails.filter(e => e.includes('@')))];
+}
+
+/**
+ * Grants editor access to a Drive FILE (not folder) for a list of names/emails.
+ * Used to give approval-workflow participants access to the routed document.
+ *
+ * @param {string} docUrlOrId A Drive URL or bare file ID.
+ * @param {Array<string>} identifiers Names and/or emails, any supported format.
+ * @returns {{granted: Array<string>, failed: Array<string>, fileId: string}}
+ *          Caller MUST inspect .failed — a non-empty value means those people
+ *          will hit Google's "Request access" screen.
+ * @private
+ */
+function grantDocAccessFast_(docUrlOrId, identifiers) {
+    const empty = { granted: [], failed: [], fileId: '' };
+    if (!docUrlOrId) return empty;
+
+    // Primary_Doc_ID holds a full URL in practice, but tolerate a bare ID.
+    const idMatch = String(docUrlOrId).match(/[-\w]{25,}/);
+    if (!idMatch || !idMatch[0]) {
+        console.warn(`grantDocAccessFast_: no Drive file ID found in "${docUrlOrId}"`);
+        return empty;
+    }
+
+    const result = grantDriveEditorAccess_(idMatch[0], identifiers, 'file');
+    result.fileId = idMatch[0];
+    return result;
+}
+
+/**
+ * Grants editor access to a Drive folder for a list of names/emails using parallel batch processing.
+ * Supports "First Last <email@gsa.gov>", plain emails, and comma-separated lists.
+ */
+function grantFolderAccessFast_(folderId, identifiers) {
+    return grantDriveEditorAccess_(folderId, identifiers, 'folder');
+}
+
+/**
+ * Shared implementation behind grantFolderAccessFast_ and grantDocAccessFast_.
+ *
+ * The Drive permissions API is identical for folders and files, so the only
+ * difference is which DriveApp accessor the last-resort fallback uses.
+ *
+ * @param {string} fileId A Drive folder or file ID.
+ * @param {Array<string>} identifiers Names and/or emails, any supported format.
+ * @param {string} kind 'folder' or 'file' — selects the DriveApp fallback.
+ * @returns {{granted: Array<string>, failed: Array<string>}}
+ * @private
+ */
+function grantDriveEditorAccess_(fileId, identifiers, kind) {
+    const outcome = { granted: [], failed: [] };
+    if(!identifiers || identifiers.length === 0 || !fileId) return outcome;
+
+    const getDriveTarget = () => (kind === 'folder')
+        ? DriveApp.getFolderById(fileId)
+        : DriveApp.getFileById(fileId);
+
+    const validEmails = resolveIdentifiersToEmails_(identifiers);
+    if(validEmails.length === 0) return outcome;
+
+    const folderId = fileId; // preserve the identifier name used below
     
     // 3. Check existing permissions first to prevent duplicate grants and notification spam
     const alreadyHasAccess = new Set();
@@ -798,7 +869,7 @@ function grantFolderAccessFast_(folderId, identifiers) {
     // Fallback: check DriveApp editors / owner if alreadyHasAccess is empty
     if (alreadyHasAccess.size === 0) {
         try {
-            const folder = DriveApp.getFolderById(folderId);
+            const folder = getDriveTarget();
             try {
                 const owner = folder.getOwner();
                 if (owner && owner.getEmail()) alreadyHasAccess.add(owner.getEmail().toLowerCase());
@@ -817,7 +888,8 @@ function grantFolderAccessFast_(folderId, identifiers) {
     const toGrant = validEmails.filter(e => !alreadyHasAccess.has(e));
     if (toGrant.length === 0) {
         // Everyone already has editor access! No-op: zero API calls, zero notification emails.
-        return;
+        outcome.granted = validEmails.slice();
+        return outcome;
     }
 
     // 4. Grant access silently (sendNotificationEmail: false)
@@ -836,7 +908,9 @@ function grantFolderAccessFast_(folderId, identifiers) {
         } catch(err) {
             console.warn(`Drive.Permissions.create failed for ${email}: ${err.message}`);
         }
-        if (!granted) {
+        if (granted) {
+            outcome.granted.push(email);
+        } else {
             stillNeedFallback.push(email);
         }
     });
@@ -857,25 +931,39 @@ function grantFolderAccessFast_(folderId, identifiers) {
             const responses = UrlFetchApp.fetchAll(requests);
             responses.forEach((res, idx) => {
                 const code = res.getResponseCode();
+                const email = stillNeedFallback[idx];
                 if (code >= 400) {
-                    console.warn(`Drive REST API permission grant for ${stillNeedFallback[idx]} returned ${code}: ${res.getContentText()}`);
+                    console.warn(`Drive REST API permission grant for ${email} returned ${code}: ${res.getContentText()}`);
                     try {
-                        DriveApp.getFolderById(folderId).addEditor(stillNeedFallback[idx]);
+                        getDriveTarget().addEditor(email);
+                        outcome.granted.push(email);
                     } catch(fallbackErr) {
-                        console.error(`DriveApp fallback failed for ${stillNeedFallback[idx]}: ${fallbackErr.message}`);
+                        console.error(`DriveApp fallback failed for ${email}: ${fallbackErr.message}`);
+                        outcome.failed.push(email);
                     }
+                } else {
+                    outcome.granted.push(email);
                 }
             });
         } catch(e) {
             console.error("Failed to batch grant folder access via UrlFetch: " + e.message);
             try {
-                const folder = DriveApp.getFolderById(folderId);
+                const folder = getDriveTarget();
                 stillNeedFallback.forEach(email => {
-                    try { folder.addEditor(email); } catch(err) {}
+                    try {
+                        folder.addEditor(email);
+                        outcome.granted.push(email);
+                    } catch(err) {
+                        outcome.failed.push(email);
+                    }
                 });
-            } catch(fallbackAllErr) {}
+            } catch(fallbackAllErr) {
+                stillNeedFallback.forEach(email => outcome.failed.push(email));
+            }
         }
     }
+
+    return outcome;
 }
 
 /**
