@@ -82,30 +82,6 @@ function appendSignatureToDoc_(fileId, email, role, action, notes) {
 }
 
 /**
- * Downgrades all specified approver emails to Commenter access.
- */
-function downgradeToCommenter_(fileId, emails) {
-  try {
-    const token = ScriptApp.getOAuthToken();
-    emails.forEach(email => {
-      if(email && email.includes('@')) {
-          const url = `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=false`;
-          const payload = { role: 'commenter', type: 'user', emailAddress: email.trim() };
-          UrlFetchApp.fetch(url, {
-              method: 'post',
-              contentType: 'application/json',
-              headers: { Authorization: "Bearer " + token },
-              payload: JSON.stringify(payload),
-              muteHttpExceptions: true
-          });
-      }
-    });
-  } catch(e) {
-    console.error("Failed to downgrade permissions: " + e.message);
-  }
-}
-
-/**
  * Creates a copy of the approved document in the item's folder, 
  * and prepends the routing log.
  */
