@@ -57,17 +57,53 @@ The codebase is version-controlled via GitHub (`clolry/fact`) and deployed using
 
 ### Environments
 We maintain three active environments:
-1. **PMSC Production:** (Script ID: `1ltCzOYebrPSRE53UkpALyMJajtoLprGqEn8f2qYsHxV2Ue5W9StUfOXl`) - Main operating environment for PMSC.
-2. **FCA Production:** (Script ID: `1N6Cyyg1uFKD0VBdozcLJqZlWhP_9P0MsjgcAvV6iC-FB6wyiYL-LVppC`) - Main operating environment for FCA.
-3. **Sandbox:** (Script ID: `1UFy82UYrg9D_hmcU78bTU61RrECCvxUumiBE-VsKtAoSSluGxY-0BW_x`) - Staging environment for testing new features safely.
+1. **PMSC Production:** Main operating environment for PMSC.
+2. **FCA Production:** Main operating environment for FCA.
+3. **Sandbox:** Staging environment for testing new features safely.
+
+Each environment's Apps Script project ID and web app deployment ID are held as
+GitHub **Environment Secrets** (`SCRIPT_ID`, `DEPLOYMENT_ID`) and are
+deliberately not reproduced here — this repository is public. To read the
+current target of an environment you need repository admin; run
+`sh scripts/check-deploy-secrets.sh`, which reports secret *names* and
+resolution only (values are not retrievable through the GitHub API).
+
+> [!NOTE]
+> These identifiers were previously published in this document and in workflow
+> source, so they remain in public git history and cannot be retracted.
+> Removing them here limits further exposure; it does not undo the prior
+> disclosure. Access to the web apps rests on `"access": "DOMAIN"` plus the
+> in-code email authorization checks in `Code.js` — never on identifier
+> secrecy. See `docs/adr/0002-deployment-hardening.md`.
 
 ### Deployment Workflow
-The `.github/workflows/deploy.yml` handles automated deployments.
-- **`main` branch pushes:** Automatically build and deploy via `clasp push` to both PMSC Production and FCA Production.
-- **`sandbox` or `dev` branch pushes:** Automatically deploy to the Sandbox environment.
+The `.github/workflows/deploy.yml` handles automated deployments. A separate
+`verify.yml` runs `scripts/check.sh` on pull requests; it holds no secrets and
+cannot deploy.
+
+- **`sandbox` branch pushes:** Automatically deploy to the Sandbox environment.
+  No approval required — this is the default validation target.
+- **`main` branch pushes:** Deploy to PMSC Production and then FCA Production as
+  **separate jobs, each gated on human approval.** The run pauses in the
+  Actions tab until a reviewer approves that environment. FCA `needs:` PMSC, so
+  a PMSC failure leaves both production environments on the previous version.
+
+The `dev` branch no longer triggers any deployment (issue #13).
+
+> [!IMPORTANT]
+> `prevent_self_review` is enabled on both production environments, so whoever
+> merges to `main` **cannot** approve the resulting deployment. A production
+> release requires the other developer. Merging and finding no approve button is
+> the control working, not a fault. See `AGENTS.md` §2 and §7.2 for the approval
+> and post-deploy verification steps.
 
 > [!CAUTION]
 > Never edit the code directly in the GAS Editor in the browser. Always pull to your local machine, make edits, and push via git to trigger the CI/CD pipeline. Direct edits in the browser will be overwritten by the next GitHub Action deployment.
+
+> [!CAUTION]
+> A green Actions run means `clasp push` and `clasp deploy` exited zero — not
+> that the application works. Walk the Sandbox Validation Checklist in
+> `PROJECT_PLAN.md` before treating a deploy as verified.
 
 ---
 

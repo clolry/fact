@@ -420,73 +420,108 @@ Developers must not run clasp push or clasp deploy from local machines as part o
 The current GitHub Actions workflow is:
 .github/workflows/deploy.yml
 
-The existing workflow:
+As of 2026-10-05 the Target Workflow below is IMPLEMENTED. See
+docs/adr/0002-deployment-hardening.md. The workflow:
 
 installs Node.js 20;
-installs @google/clasp;
-writes CLASPRC_JSON to ~/.clasprc.json;
-configures .clasp.json;
+installs @google/clasp pinned to an exact version;
+writes CLASPRC_JSON to ~/.clasprc.json via env: under umask 077, and removes it
+  after the job;
+patches only .scriptId in .clasp.json, preserving all other keys;
 runs clasp push --force;
 runs clasp deploy;
-deploys sandbox and dev branches to Sandbox;
-deploys main to both PMSC production and FCA production.
+deploys sandbox to Sandbox (the dev trigger has been removed);
+deploys main to PMSC production and then FCA production, each as a separate job
+  gated on required-reviewer approval via GitHub Environments, with FCA
+  dependent on PMSC succeeding;
+reads SCRIPT_ID and DEPLOYMENT_ID from Environment Secrets rather than workflow
+  source, and aborts loudly if any required secret is unset.
+
+A separate verify.yml runs scripts/check.sh on pull requests. It holds no
+secrets and cannot deploy. The verify check is required on main.
 
 ### Target Workflow
-The target governed workflow should be:
+IMPLEMENTED as of 2026-10-05.
 Source Branch	Environment	Deployment Behavior
 <code>sandbox</code>	Sandbox	Automatic deployment after merge/push to <code>sandbox</code>
-<code>dev</code>	Sandbox	Legacy only; retire or remove from deployment trigger when no longer needed
-<code>main</code>	PMSC Production	Deploy only after explicit human approval
-<code>main</code>	FCA Production	Deploy only after explicit human approval
+<code>main</code>	PMSC Production	Deploys only after explicit human approval (required reviewers)
+<code>main</code>	FCA Production	Deploys only after explicit human approval; also requires PMSC to have succeeded
+
+The <code>dev</code> branch has been removed from deployment triggers
+(issue #13).
 
 ### Production Approval
-Production deployments must require explicit human approval.
+Production deployments require explicit human approval. As built:
 
-Preferred implementation:
+GitHub Environments in use:
 
-Use GitHub Environments:
+sandbox (no protection rules — validation must stay frictionless)
+pmsc-production (required reviewers)
+fca-production (required reviewers)
 
-sandbox
-pmsc-production
-fca-production
-Configure required reviewers for:
+Required reviewers on both production environments are Chris Olry and Ozel
+Kirkland, with prevent_self_review enabled. Consequence worth planning around:
+whoever merges to main cannot approve the resulting deployment, so a
+production release needs both developers available.
 
-pmsc-production
-fca-production
-Store environment-specific values in GitHub Environment Secrets.
+can_admins_bypass is true on both production environments, matching the
+enforce_admins:false posture on main. An emergency path exists and every use
+is recorded in the repository audit log.
 
-Require successful checks before deployment.
+Environment-specific values are stored in GitHub Environment Secrets.
 
-Deploy PMSC production and FCA production together from main unless an approved future process separates them.
+The verify check is required on main before merge.
+
+PMSC and FCA deploy from main as separate jobs rather than together. FCA
+depends on PMSC succeeding, so a PMSC failure leaves both environments on the
+previous version. This satisfies the intent of deploying them "together" —
+neither advances without the other — while making FCA independently
+re-runnable if it alone fails. Apps Script provides no atomic multi-project
+deploy, so the PMSC-succeeds-then-FCA-fails divergence window is narrowed and
+recoverable, not eliminated.
 
 ## GitHub Secrets and Environment Configuration
 ### Current State
-The existing workflow contains Apps Script project and deployment identifiers inline in YAML. This works operationally, but the target governance model is to move environment-specific identifiers out of the workflow body and into GitHub Secrets or GitHub Environment Secrets.
+IMPLEMENTED as of 2026-10-05. Identifiers are no longer inline in workflow
+YAML; each environment supplies its own via Environment Secrets.
 
-Recommended GitHub Environment Secrets
-Use environment-specific secrets like the following:
+As-built secret names (verified read-only on 2026-10-05 via
+scripts/check-deploy-secrets.sh):
 Environment	Secret Name	Purpose
-Repository or each environment	<code>CLASPRC_JSON</code>	clasp authentication JSON
-<code>sandbox</code>	<code>GAS_SCRIPT_ID</code>	Sandbox Apps Script project ID
-<code>sandbox</code>	<code>GAS_DEPLOYMENT_ID</code>	Sandbox web app deployment ID
-<code>pmsc-production</code>	<code>GAS_SCRIPT_ID</code>	PMSC production Apps Script project ID
-<code>pmsc-production</code>	<code>GAS_DEPLOYMENT_ID</code>	PMSC production web app deployment ID
-<code>fca-production</code>	<code>GAS_SCRIPT_ID</code>	FCA production Apps Script project ID
-<code>fca-production</code>	<code>GAS_DEPLOYMENT_ID</code>	FCA production web app deployment ID
+Repository	<code>CLASPRC_JSON</code>	clasp authentication JSON, shared — one credential authorizes all three projects, so it is held once to keep rotation to a single action
+<code>sandbox</code>	<code>SCRIPT_ID</code>	Sandbox Apps Script project ID
+<code>sandbox</code>	<code>DEPLOYMENT_ID</code>	Sandbox web app deployment ID
+<code>pmsc-production</code>	<code>SCRIPT_ID</code>	PMSC production Apps Script project ID
+<code>pmsc-production</code>	<code>DEPLOYMENT_ID</code>	PMSC production web app deployment ID
+<code>fca-production</code>	<code>SCRIPT_ID</code>	FCA production Apps Script project ID
+<code>fca-production</code>	<code>DEPLOYMENT_ID</code>	FCA production web app deployment ID
 
-### Recommended .clasp.json Handling
-Target state:
+Note: this plan originally recommended the names GAS_SCRIPT_ID and
+GAS_DEPLOYMENT_ID. The implementation used SCRIPT_ID and DEPLOYMENT_ID. The
+GAS_ prefix added no disambiguation — these secrets are already scoped to a
+GitHub Environment within an Apps-Script-only repository — and renaming now
+would require recreating six secrets in three environments for a cosmetic
+gain. The as-built names are recorded here as authoritative.
 
-generate .clasp.json dynamically inside GitHub Actions;
-do not rely on manually edited environment-specific .clasp.json;
-avoid committing secrets or environment-specific credentials;
-if .clasp.json remains committed, confirm it points only to a non-sensitive/default development target and cannot accidentally deploy production.
-Recommended generated format:
+Because SCRIPT_ID and DEPLOYMENT_ID are environment-SPECIFIC, they must never
+be set at repository level. A repository secret acts as a fallback for any
+environment lacking its own copy, so a repo-level SCRIPT_ID would silently
+cause every environment to deploy to one project while reporting success.
+scripts/check-deploy-secrets.sh checks for exactly this condition.
 
-{
-  "scriptId": "${GAS_SCRIPT_ID}",
-  "rootDir": "."
-}
+### .clasp.json Handling
+As-built: the committed .clasp.json is preserved and only its scriptId is
+patched in CI, using jq. The original recommendation was to regenerate the
+file wholesale as {"scriptId": ..., "rootDir": "."}, which is what the old
+workflow did — and that discarded scriptExtensions, htmlExtensions,
+jsonExtensions, filePushOrder and skipSubdirectories, so CI pushed under
+different rules than a local push (issue #12). Patching a single key keeps CI
+and local behavior identical.
+
+The committed .clasp.json still points at PMSC production, which means a local
+clasp push would target production. Tracked privately as a security advisory;
+it is mitigated by Key Requirement #5 (no routine local push) rather than by
+the file's contents.
 
 ## Testing and Validation
 ### Current Automated Test Status
