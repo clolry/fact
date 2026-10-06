@@ -17,6 +17,64 @@ function isAnyFYI_(type) {
 }
 
 /**
+ * Grants editor access to the routed document for a set of workflow participants
+ * and records the outcome on the item.
+ *
+ * Every approval path calls this, so an approver cannot be emailed an Approve
+ * button for a document they cannot open. Sharing is attempted at workflow
+ * start, on every step advance, and on delegation — a later approver is not
+ * known at start time, and a delegate is not known until an admin reassigns.
+ *
+ * Failures are surfaced, not swallowed: a note is written to the item so the
+ * owner can see which participants still lack access. This is deliberately
+ * non-fatal — a sharing failure must not block the approval itself, because the
+ * document may be owned outside the organization or live on a Shared Drive the
+ * deploying account cannot administer.
+ *
+ * @param {string} itemId       The item ID, for the audit note.
+ * @param {string} primaryDoc   Drive URL or ID of the routed document.
+ * @param {Array<string>} identifiers Names and/or emails, any supported format.
+ * @param {string} context      Short phrase naming the trigger, for the log.
+ * @returns {{granted: Array<string>, failed: Array<string>}}
+ * @private
+ */
+function shareDocWithParticipants_(itemId, primaryDoc, identifiers, context) {
+  const outcome = { granted: [], failed: [] };
+  if (!primaryDoc || !identifiers || identifiers.length === 0) return outcome;
+  if (typeof grantDocAccessFast_ !== 'function') {
+    console.error(`shareDocWithParticipants_: grantDocAccessFast_ unavailable (${context})`);
+    return outcome;
+  }
+
+  try {
+    const result = grantDocAccessFast_(primaryDoc, identifiers);
+    outcome.granted = result.granted || [];
+    outcome.failed = result.failed || [];
+
+    if (outcome.granted.length > 0) {
+      console.log(`Doc access granted (${context}) for ${itemId}: ${outcome.granted.join(', ')}`);
+    }
+
+    if (outcome.failed.length > 0) {
+      const msg = `⚠️ Could not grant document access to: ${outcome.failed.join(', ')}. ` +
+                  `They will be prompted to request access. Share the document manually, ` +
+                  `or confirm the deploying account can manage sharing on it. (${context})`;
+      console.error(`Doc access FAILED (${context}) for ${itemId}: ${outcome.failed.join(', ')}`);
+      try {
+        if (typeof addNote === 'function') addNote(itemId, msg, 'System.Drive');
+      } catch(noteErr) {
+        console.warn("Could not log doc-access failure note: " + noteErr.message);
+      }
+    }
+  } catch(e) {
+    // Non-fatal by design — see the note above. Logged, never silent.
+    console.error(`shareDocWithParticipants_ threw (${context}) for ${itemId}: ${e.message}`);
+  }
+
+  return outcome;
+}
+
+/**
  * Public endpoint called by google.script.run from the UI.
  * @param {string} itemId The item ID to advance
  * @param {string} actionType 'Approve', 'Decline', or 'Return'
@@ -175,31 +233,20 @@ function startAdvancedWorkflow(itemId, workflowSteps, notes, delayVal, delayUnit
     });
     stakeholders = [...new Set(stakeholders)].filter(s => s);
     
-    let fileIdMatch = null;
+    // Grant every workflow participant editor access to the routed document.
+    //
+    // This previously hand-rolled its own Drive call and passed each identifier
+    // straight through as `emailAddress`. The approver fields use an
+    // autocomplete that writes "First Last <email@gsa.gov>", so the API received
+    // a display string, rejected it with HTTP 400, and — because the request set
+    // muteHttpExceptions with no response-code check inside a console-only catch
+    // — the failure was invisible. Approvers then hit "Request access".
+    //
+    // grantDocAccessFast_ reuses the same identifier resolution as folder
+    // sharing (angle brackets, bare emails, Stakeholders name lookup), passes
+    // supportsAllDrives, and reports which addresses failed.
     if (primaryDoc) {
-        fileIdMatch = primaryDoc.match(/[-\w]{25,}/);
-    }
-    
-    if (fileIdMatch && fileIdMatch[0]) {
-        try {
-            const token = ScriptApp.getOAuthToken();
-            const docId = fileIdMatch[0];
-            stakeholders.forEach(email => {
-                if(email.includes('@')) {
-                    const url = `https://www.googleapis.com/drive/v3/files/${docId}/permissions?sendNotificationEmail=false`;
-                    const payload = { role: 'writer', type: 'user', emailAddress: email };
-                    UrlFetchApp.fetch(url, {
-                        method: 'post',
-                        contentType: 'application/json',
-                        headers: { Authorization: "Bearer " + token },
-                        payload: JSON.stringify(payload),
-                        muteHttpExceptions: true
-                    });
-                }
-            });
-        } catch(e) {
-            console.error("Failed to add editors silently: " + e.message);
-        }
+        shareDocWithParticipants_(itemId, primaryDoc, stakeholders, 'workflow start');
     }
     
     // Send FYI emails for any start-time auto-completed FYI steps
@@ -337,15 +384,29 @@ function overrideAdvancedWorkflow(itemId, stepIndex, newEmail, oldEmail) {
                       SpreadsheetApp.flush();
                       
                       // If the step is Pending, notify the new delegate only
-                      if (isPending && typeof sendApprovalActionEmail_ === 'function') {
-                          sendApprovalActionEmail_(
-                              itemId,
-                              rowData['Title'] || itemId,
-                              steps[stepIndex],
-                              [newEmail],
-                              rowData['Primary_Doc_ID'] || '',
-                              newWfStr
-                          );
+                      if (isPending) {
+                          // A delegate was unknown at workflow start, so nothing
+                          // has ever shared the document with them. Share before
+                          // notifying.
+                          if (rowData['Primary_Doc_ID']) {
+                              shareDocWithParticipants_(
+                                  itemId,
+                                  rowData['Primary_Doc_ID'],
+                                  [newEmail],
+                                  'approver delegation'
+                              );
+                          }
+
+                          if (typeof sendApprovalActionEmail_ === 'function') {
+                              sendApprovalActionEmail_(
+                                  itemId,
+                                  rowData['Title'] || itemId,
+                                  steps[stepIndex],
+                                  [newEmail],
+                                  rowData['Primary_Doc_ID'] || '',
+                                  newWfStr
+                              );
+                          }
                       }
                   }
               }
@@ -514,6 +575,20 @@ function saveAndAdvanceWorkflowState_(itemId, sheet, rowData, rowIndex, steps, l
                     nextStep.sentAt = new Date().toISOString();
                     nextExecStatus = 'Routing';
                     
+                    // Share the document with the step we are about to notify.
+                    // Start-time sharing cannot cover this: a later approver may
+                    // have been added, delegated, or changed since then. Share
+                    // BEFORE the email goes out so the Approve button never
+                    // arrives ahead of access.
+                    if (primaryDocUrl) {
+                        shareDocWithParticipants_(
+                            itemId,
+                            primaryDocUrl,
+                            nextStep.approvers || [],
+                            `step ${nextStep.step || nextStepIdx + 1} activation`
+                        );
+                    }
+
                     if (typeof sendApprovalActionEmail_ === 'function') {
                         sendApprovalActionEmail_(itemId, rowData['Title'] || itemId, nextStep, nextStep.approvers, primaryDocUrl, JSON.stringify({steps: steps, log: log, originalAssigned: originalAssigned, history: history}));
                     }
@@ -628,14 +703,26 @@ function sendApprovalReminderBackend(itemId, stepIndex) {
                   let parsed = JSON.parse(wfStr);
                   let steps = Array.isArray(parsed) ? parsed : (parsed.steps || []);
                   
-                  if (steps[stepIndex] && steps[stepIndex].status === 'Pending') {
-                      const stepObj = steps[stepIndex];
-                      
-                      if (typeof sendApprovalActionEmail_ === 'function') {
-                          sendApprovalActionEmail_(itemId, title, stepObj, stepObj.approvers, primaryDocUrl, JSON.stringify({steps: steps, log: []}), true);
-                          addNote(itemId, `Admin sent a reminder for step ${stepIndex+1}.`, "System");
-                      }
-                  } else {
+                   if (steps[stepIndex] && steps[stepIndex].status === 'Pending') {
+                       const stepObj = steps[stepIndex];
+                       
+                       if (typeof sendApprovalActionEmail_ === 'function') {
+                           // A reminder is often sent precisely because the
+                           // approver could not act. Re-assert sharing so the
+                           // reminder does not repeat an inaccessible link.
+                           if (primaryDocUrl) {
+                               shareDocWithParticipants_(
+                                   itemId,
+                                   primaryDocUrl,
+                                   stepObj.approvers || [],
+                                   `reminder for step ${stepIndex + 1}`
+                               );
+                           }
+
+                           sendApprovalActionEmail_(itemId, title, stepObj, stepObj.approvers, primaryDocUrl, JSON.stringify({steps: steps, log: []}), true);
+                           addNote(itemId, `Admin sent a reminder for step ${stepIndex+1}.`, "System");
+                       }
+                   } else {
                       throw new Error("Step not pending or invalid step index.");
                   }
               }
@@ -1275,6 +1362,19 @@ function processAsyncWorkflowStep1_(e) {
         }
         
         if (typeof sendApprovalActionEmail_ === 'function') {
+           // Delayed start: the comment-period timer has fired and we are about
+           // to notify the first blocking approver. job.step/job.approvers were
+           // just re-read from the live sheet above, so share against those
+           // rather than the snapshot taken when the trigger was created.
+           if (job.primaryDoc) {
+               shareDocWithParticipants_(
+                   job.itemId,
+                   job.primaryDoc,
+                   job.approvers || [],
+                   'delayed workflow start'
+               );
+           }
+
            sendApprovalActionEmail_(job.itemId, job.itemTitle, job.step, job.approvers, job.primaryDoc, liveWorkflowStr || job.workflowStr || JSON.stringify({steps: [job.step], log: []}));
         }
       } catch (err) {
