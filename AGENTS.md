@@ -59,11 +59,24 @@ Practical consequences:
 Sandbox is the default target for all validation. Nothing reaches production
 without passing through Sandbox first (`PROJECT_PLAN.md` Key Requirement #2).
 
-**Known gap:** production deployment approval is not yet enforced in CI. A
-merge to `main` currently deploys to both production environments
-automatically. Tracked privately as a security advisory; remediation is
-"Increment 2". Until that lands, the pull request review on `main` is the only
-gate — treat every `main` merge as a production release.
+**Production deploys are gated.** A merge to `main` does not release. The
+`pmsc-production` and `fca-production` GitHub Environments each require
+reviewer approval, so the workflow **pauses** and waits for a human. FCA
+depends on PMSC succeeding, so a PMSC failure leaves both environments on the
+previous version. See `docs/adr/0002-deployment-hardening.md`.
+
+**You cannot approve your own deployment.** `prevent_self_review` is on, so
+whoever merges to `main` must get the *other* developer to approve each
+production deploy. Merging and then finding no approve button is the control
+working, not a bug. Plan releases when both of you are available.
+
+Approving a deployment: the paused run appears in the **Actions** tab with a
+"Review deployments" prompt. Select the environment, then **Approve and
+deploy**. Approval is per environment — PMSC and FCA are approved separately.
+
+An admin bypass exists (`can_admins_bypass: true`), matching the
+`enforce_admins: false` posture on `main`. Every use is recorded in the
+repository audit log. Routine use defeats the control.
 
 ---
 
@@ -267,20 +280,30 @@ works.
 
 **Step 1 — confirm the Actions run.** Repository → **Actions** tab. The top
 entry is the most recent run. Confirm a green checkmark and the expected
-branch. Click it, then click the `deploy` job to see per-step results.
+branch. Click it to see the per-job results.
 
-Expect exactly this pattern:
+The hardened workflow uses one **job per environment**, not one job with
+conditional steps. Expect this pattern:
 
-| Step | `sandbox` push | `main` push |
+| Job | `sandbox` push | `main` push |
 |---|---|---|
-| Configure Sandbox Deployment | success | **skipped** |
-| Configure PMSC Production Deployment | **skipped** | success |
-| Configure FCA Production Deployment | **skipped** | success |
+| Deploy to Sandbox | success | **skipped** |
+| Deploy to PMSC Production | **skipped** | success *(after approval)* |
+| Deploy to FCA Production | **skipped** | success *(after approval)* |
 
-If the step that should have run was skipped, the branch condition did not
-match and **nothing was deployed** despite a green run. If a production step
-failed while the other succeeded, the two production environments have
-diverged — investigate before pushing anything else.
+On a `main` push the two production jobs sit at **"Waiting"** until a reviewer
+approves each one. A run parked there has deployed nothing — that is the gate,
+not a hang.
+
+If the job that should have run was skipped, the branch condition did not match
+and **nothing was deployed** despite a green run. If PMSC failed, FCA will show
+as skipped by design (`needs:`) and both environments remain on the previous
+version. If PMSC succeeded and FCA failed, the two production environments have
+**diverged** — investigate before pushing anything else; FCA can be re-run
+without re-pushing PMSC.
+
+A job that failed at a `::error::` guard (`SCRIPT_ID is not set`, etc.) aborted
+*before* touching Apps Script. Fix the secret, then re-run.
 
 **Step 2 — confirm the application actually works.** Green CI does not prove
 this. Open the web app for the environment and walk the Sandbox Validation
@@ -335,6 +358,7 @@ output without the human copying terminal text.
 | Script | Purpose |
 |---|---|
 | `check.sh` | One-command verification; also runs in CI as `verify` |
+| `check-deploy-secrets.sh` | **Read-only** probe of deployment secrets and environment gates. Lists secret *names* only — values are not retrievable via the API. Run before a production release to confirm each environment resolves its own `SCRIPT_ID`/`DEPLOYMENT_ID` |
 | `setup-branch-protection.sh` | Applied Phase 1 protection to `main` + `sandbox` |
 | `add-collaborator.sh` | Granted `@0zelKirkland` push access |
 | `create-issues.sh` | Filed non-security tracking issues |
@@ -344,7 +368,8 @@ output without the human copying terminal text.
 are local operational records, not source.
 
 These scripts are **not idempotent**. Re-running the issue and advisory
-scripts creates duplicates.
+scripts creates duplicates. `check.sh` and `check-deploy-secrets.sh` are the
+exceptions — both are read-only and safe to re-run.
 
 ---
 

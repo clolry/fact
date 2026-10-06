@@ -140,9 +140,14 @@
     .status-blocked { background: #ffcdd2; color: #000; border: 1px solid #ef9a9a; }
     .status-done { background: #c8e6c9; color: #000; border: 1px solid #a5d6a7; }
     .status-default { background: #e0e0e0; color: #000; border: 1px solid #bdbdbd; }
-    .status-log-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+    /* table-layout:fixed makes the <th> width hints authoritative. Under the
+       default 'auto' algorithm they are only suggestions, so a long unbroken
+       token in a comment (a pasted URL, a contract number) widened the table
+       past the ~698px available inside the modal and the text was clipped
+       rather than wrapped. overflow-wrap lets such a token break. */
+    .status-log-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; table-layout: fixed; }
     .status-log-table th { background: #f1f3f4; padding: 8px; text-align: left; border-bottom: 2px solid #dadce0; color: #5f6368; font-weight: 600; }
-    .status-log-table td { padding: 8px; border-bottom: 1px solid #dadce0; vertical-align: top; }
+    .status-log-table td { padding: 8px; border-bottom: 1px solid #dadce0; vertical-align: top; overflow-wrap: anywhere; }
     .status-update-form { background: #f8f9fa; border: 1px solid #dadce0; border-radius: 8px; padding: 15px; margin-top: 15px; }
     .full-width { grid-column: 1 / -1; width: 100%; }
     .modal-footer { padding: 15px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; background: rgba(0,0,0,0.02); }
@@ -3472,6 +3477,21 @@ function enableWeeklyReview() {
               });
           };
           
+          // Approval timestamps were rendered TWICE on every approved step: once
+          // per approver (parsed from the activity-log bracket, below) and once
+          // for the step as a whole (from s.approvedAt, here). Both formatters
+          // emit an identical "mm/dd/yyyy, hh:mm TZ" string, so the same value
+          // appeared on two consecutive lines.
+          //
+          // Which one carries the useful information depends on the step type:
+          //   Parallel   — several approvers act independently, so the PER-APPROVER
+          //                times matter; the step-level value is only the last one.
+          //   Sequential — one approver, so the two are the same fact. Keep the
+          //                step-level line, which reads from the structured
+          //                s.approvedAt rather than from a parsed log string.
+          // Each branch renders exactly one "Approved" timestamp.
+          const isParallelStep = (tLower === 'parallel');
+
           let timeHtml = '';
           if (s.sentAt) {
               timeHtml += `<div style="font-size:0.75rem; color:#666; margin-top:4px;">🕒 Sent: ${formatDt(s.sentAt)}</div>`;
@@ -3479,7 +3499,7 @@ function enableWeeklyReview() {
           if (s.approvedAt) {
               if (s.status === 'Removed') {
                   timeHtml += `<div style="font-size:0.75rem; color:#5f6368; margin-top:2px;">🚫 Removed/Skipped: ${formatDt(s.approvedAt)}</div>`;
-              } else {
+              } else if (!isParallelStep) {
                   timeHtml += `<div style="font-size:0.75rem; color:#188038; margin-top:2px;">✅ Approved: ${formatDt(s.approvedAt)}</div>`;
               }
           }
@@ -3516,9 +3536,13 @@ function enableWeeklyReview() {
                     ${s.approvers.map((a, aIdx) => {
                         let hasApproved = s.approvedBy && s.approvedBy.some(ab => window.QT1D.isSameUser(ab, a));
                         
-                        // Try to find exact timestamp from logLines
+                        // Per-approver timestamp, parsed from the activity log.
+                        // Rendered only on Parallel steps — see the note above
+                        // timeHtml. On Sequential steps the step-level
+                        // "✅ Approved" line already states this same time, and
+                        // showing both duplicated it.
                         let userApprovedTime = '';
-                        if (hasApproved) {
+                        if (hasApproved && isParallelStep) {
                             const matchedLog = logLines.find(l => {
                                 if (!l.includes('Approve')) return false;
                                 const emailMatch = l.match(/\(Email:\s*(.*?)\)/);
@@ -4147,6 +4171,18 @@ function ensureSaved(callback) {
         google.script.run.withSuccessHandler((res) => {
             if(res.success && res.id) {
                 document.getElementById('f_id').value = res.id;
+                // Same reason as in saveForm(): this save provisioned the folder,
+                // so the returned link must land in #f_drive. Setting #f_id above
+                // makes the record "existing" for every later save, and a later
+                // save would otherwise send the empty field and blank DriveLink
+                // in the sheet.
+                if (res.driveLink !== undefined && res.driveLink !== null) {
+                    const driveField = document.getElementById('f_drive');
+                    if (driveField) {
+                        driveField.value = res.driveLink;
+                        if (typeof renderLinkPreview === 'function') renderLinkPreview();
+                    }
+                }
                 refreshBoardData(() => {
                     document.getElementById('loading-overlay').style.display = 'none';
                     if (callback) callback(res.id);
@@ -4250,6 +4286,26 @@ function saveForm(closeModalAfter = true, callback = null) {
         if(res.success) {
             if (res.id) {
                 document.getElementById('f_id').value = res.id;
+            }
+            // Sync the Drive link back into the open form.
+            //
+            // The server provisions the folder during this save and returns the
+            // resulting URL, but the field it came from (#f_drive) was empty at
+            // submit time. Without writing it back, two things broke when the
+            // user saved and stayed in the modal:
+            //   1. The Links section stayed empty until the record was reopened.
+            //   2. A SECOND save re-sent the still-empty #f_drive as DriveLink.
+            //      With #f_id now set, the server treats the record as existing,
+            //      skips provisioning, and setVal('DriveLink', '') overwrote the
+            //      good URL in the sheet — silently losing the folder link.
+            // Assigning before re-rendering the preview fixes the display and
+            // makes the next save round-trip the correct value.
+            if (res.driveLink !== undefined && res.driveLink !== null) {
+                const driveField = document.getElementById('f_drive');
+                if (driveField) {
+                    driveField.value = res.driveLink;
+                    if (typeof renderLinkPreview === 'function') renderLinkPreview();
+                }
             }
             if (res.copiedFilesCount > 0) {
                 showToast(`📁 Cloned ${res.copiedFilesCount} file(s) into item folder`, 'success');
