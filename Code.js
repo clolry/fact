@@ -110,13 +110,49 @@ function routeRequest_(e, accessLevel) {
           const timelineHtml = (typeof generateRoutingTimelineHtml_ === 'function')
               ? generateRoutingTimelineHtml_(steps)
               : '';
-          
+
+          // Link to the document under review.
+          //
+          // The notification email shows this link, but the confirm page did
+          // not — so an approver who clicked "Approve" lost the ability to read
+          // the document at the moment of deciding. foundRow and headers are
+          // already in scope from the lookup above, so no extra read is needed.
+          //
+          // Primary_Doc_ID is a free-text field, so the value is untrusted. It
+          // is validated against an allowlist of Google Docs/Drive origins and
+          // HTML-escaped before interpolation; anything else is not rendered as
+          // a link. Without this, a crafted value could inject markup or script
+          // into this page.
+          let docLinkHtml = '';
+          const docCol = headers.indexOf('Primary_Doc_ID');
+          if (docCol >= 0 && foundRow[docCol]) {
+              let docUrl = String(foundRow[docCol]).trim();
+              // Tolerate a bare file ID, matching the email's normalization.
+              if (!/^https?:\/\//i.test(docUrl) && /^[-\w]{25,}$/.test(docUrl)) {
+                  docUrl = 'https://docs.google.com/document/d/' + docUrl;
+              }
+              if (/^https:\/\/(docs|drive)\.google\.com\/[^\s"'<>]*$/i.test(docUrl)) {
+                  const safeUrl = docUrl
+                      .replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;')
+                      .replace(/'/g, '&#039;');
+                  docLinkHtml = `<p><strong>Document:</strong> `
+                      + `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open the document under review</a>`
+                      + `</p>`;
+              } else {
+                  console.warn(`Confirm page: Primary_Doc_ID for ${itemId} is not a recognized Google Docs/Drive URL; link suppressed.`);
+              }
+          }
+
           const color = action === 'Approve' ? '#0f9d58' : '#d93025';
           return HtmlService.createHtmlOutput(`
              <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 30px auto; padding: 0 20px;">
                 <h2 style="color: ${color};">Confirm ${action}</h2>
                 <p><strong>Item:</strong> ${itemId} - ${itemTitle}</p>
                 <p><strong>Your Role:</strong> ${activeStep.role || 'Approver'}</p>
+                ${docLinkHtml}
                 
                 ${timelineHtml ? `<h3 style="margin-top:20px; color:#333;">Approval Routing Status:</h3>${timelineHtml}` : ''}
                 
