@@ -27,7 +27,13 @@ name: Deploy to Google Apps Script
 #                            every green run from 2026-09-18 onward — including
 #                            production runs #37 and #39 — used 3.4.1.
 #                            (issue #11)
-#   7. actions pinned:       SHA-pinned instead of floating v4 tags.
+#   7. actions pinned:       SHA-pinned instead of floating tags. checkout
+#                            v5.1.0 and setup-node v5.0.0 — the first release
+#                            of each with a node24 action runtime. v4 ran on
+#                            node20, which GitHub deprecated on runners.
+#                            Deliberately NOT v6/v7: checkout v6.0.0 changed
+#                            credential persistence, and this workflow writes
+#                            .clasprc.json by hand. (issue #27)
 #   8. permissions:          contents: read only.
 #   9. concurrency:          one deploy per environment at a time; never
 #                            cancels an in-flight production deploy.
@@ -68,10 +74,10 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '20'
 
@@ -128,10 +134,10 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '20'
 
@@ -191,10 +197,10 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '20'
 
