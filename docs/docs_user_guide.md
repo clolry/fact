@@ -52,8 +52,12 @@ When a task enters a step where you are assigned as an approver, you will receiv
 FACT automates status reporting to keep stakeholders informed without manual data entry.
 
 ### Time-Driven Reports
-- **Daily Digest (7 AM):** An automated summary of overdue tasks and pending approvals is compiled and emailed to the executive team every morning.
-- **Deadline Reminders (6 AM):** Users with tasks due within the next 48 hours will receive automated reminder emails.
+- **Deadline Reminders:** Users with tasks approaching their due date receive automated reminder emails.
+- **Scheduled Reports:** Report templates with a recurring schedule generate automatically on their next-run date.
+
+> **Note:** FACT does not send a daily digest email. To see what is awaiting
+> your approval, open the **Approval Queue** in the dashboard — it lists every
+> item where you are an approver on the active step.
 
 ### Accessing the Report Builder (Admin/Exec Only)
 1. Go to the **Reports** section via the sidebar.

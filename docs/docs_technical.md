@@ -35,7 +35,7 @@ The codebase is modularized into several key `.js` files for maintainability:
 - **`FACT_DataService.js`**: Abstraction layer for interacting with the Google Sheet. Handles reading, writing, and querying rows.
 - **`FACT_WorkflowEngine.js`**: The core logic for the dynamic approval workflows. It parses the JSON workflow definitions, determines the active step, and triggers emails.
 - **`FACT_DriveService.js`**: Handles authentication and backend processing for the Google Drive Picker and file attachments.
-- **`FACT_NotificationService.js`**: Centralized module for formatting and sending HTML emails (e.g., approval requests, daily digests).
+- **`FACT_NotificationService.js`**: Centralized module for formatting and sending HTML emails (e.g., approval requests, deadline reminders).
 
 ---
 
@@ -43,8 +43,19 @@ The codebase is modularized into several key `.js` files for maintainability:
 
 FACT relies on Google Apps Script Time-Driven Triggers to handle background processing without user interaction.
 
-- **Daily Digest (7 AM):** A trigger runs `generateDailyDigest()` every morning between 7 AM and 8 AM. It compiles data regarding overdue tasks and pending approvals into an email.
-- **Deadline Reminders (6 AM):** A trigger scans the `Tasks` sheet for deadlines occurring within 48 hours and dispatches reminders via `FACT_NotificationService.js`.
+- **Deadline Reminders:** `sendDueDateReminders()` (`FACT_NotesLog.js`) scans the `Tasks`, `Projects`, and `Sub_Tasks` sheets for approaching deadlines and dispatches reminders via `FACT_NotificationService.js`. Registered at 8 AM by `FACT_FcaSetup.js`. Two alias shims, `sendInternalDueReminders_` and `processWorkflowDeadlines`, forward to the same function so pre-existing triggers created under those names continue to work.
+- **Scheduled Reports:** `runScheduledReports()` (`FACT_NotesLog.js`) checks each report template's `nextRun` date and generates any that are due.
+- **Group Email Intake:** `processGroupEmails()` (`FACT_NotesLog.js`) polls the group mailbox every 10 minutes and converts messages into items.
+- **Recurring Tasks:** `generateRecurringTasks()` (`FACT_Workflow.js`).
+- **Auto-Archive:** `autoArchiveDoneItems()` (`FACT_IntakeUI.js`).
+
+> [!NOTE]
+> There is **no daily digest**. Earlier versions of this document and the user
+> guide described a `generateDailyDigest()` running at 7 AM; no such function
+> has ever existed in the codebase. The claim was removed rather than
+> implemented — the approval dashboard already surfaces pending approvals per
+> user (`renderApprovalQueue()` in `Index.html`), so a second notification
+> channel was judged unnecessary. See issue #31.
 
 > [!WARNING]
 > If the script is redeployed or copied, these triggers must be manually re-initialized by an Admin running the setup function in the GAS editor.

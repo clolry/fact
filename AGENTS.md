@@ -324,9 +324,10 @@ browser edit. Change code here, commit, and let Actions deploy it.
 
 ### 7.4 Triggers do not survive a fresh deployment
 
-Time-driven triggers (`generateDailyDigest` at 7 AM, deadline reminders at
-6 AM) must be re-initialized manually in the Apps Script editor if a project
-is recreated or copied. See `docs/docs_technical.md` §4.
+Time-driven triggers (deadline reminders via `sendDueDateReminders`, scheduled
+reports via `runScheduledReports`, group-email intake via `processGroupEmails`)
+must be re-initialized manually in the Apps Script editor if a project is
+recreated or copied. See `docs/docs_technical.md` §4.
 
 ---
 
