@@ -40,6 +40,13 @@ name: Deploy to Google Apps Script
 #  10. dev removed:          dev no longer deploys to Sandbox. (issue #13)
 #  11. fail-closed guards:   a missing secret aborts loudly rather than
 #                            deploying to an unintended target.
+#  12. runner pinned:        ubuntu-24.04, not ubuntu-latest. The latest
+#                            label migrates to Ubuntu 26.04 between
+#                            2026-10-19 and 2026-11-19, which would change
+#                            the OS under a production deploy path with no
+#                            commit to point at. Bump deliberately, in a
+#                            reviewed diff, after Sandbox proves it.
+#                            (issue #34)
 #
 # NOTE ON ATOMICITY: Apps Script offers no atomic multi-project deploy. If
 # PMSC succeeds and FCA then fails, the two production environments diverge.
@@ -66,7 +73,7 @@ jobs:
   deploy-sandbox:
     name: Deploy to Sandbox
     if: github.ref == 'refs/heads/sandbox'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: sandbox
     concurrency:
@@ -126,7 +133,7 @@ jobs:
   deploy-pmsc-production:
     name: Deploy to PMSC Production
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pmsc-production   # required reviewers gate this job
     concurrency:
@@ -189,7 +196,7 @@ jobs:
     name: Deploy to FCA Production
     needs: deploy-pmsc-production
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: fca-production    # required reviewers gate this job
     concurrency:
