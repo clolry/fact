@@ -10,6 +10,10 @@ name: verify
 # The job is named "verify" deliberately: that string is the status-check
 # context promoted to REQUIRED on main in Phase 2 (issue #14). Renaming the
 # job silently breaks that branch-protection rule.
+#
+# The runner is pinned to ubuntu-24.04 to match deploy.yml. If verify and
+# deploy ran on different OS images, a green verify would stop predicting a
+# green deploy. (issue #34)
 
 on:
   pull_request:
@@ -27,7 +31,7 @@ concurrency:
 jobs:
   verify:
     name: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Checkout

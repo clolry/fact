@@ -330,6 +330,63 @@ is recreated or copied. See `docs/docs_technical.md` §4.
 
 ---
 
+### 7.5 After a production release, merge `main` back into `sandbox`
+
+Promotion PRs are squash-merged, so the commits on `sandbox` never become
+ancestors of `main`. The merge base between the two branches therefore stays
+frozen at whatever commit they last genuinely shared.
+
+The consequence surfaces later, as a **phantom conflict**. Git compares both
+branches against that stale base, sees two independent rewrites of the same
+region, and refuses to merge — even when the branches differ only by the one
+change being promoted. This happened on PR #32: `mergeable_state: dirty` on a
+two-file, +15/-9 diff, because `deploy.yml` had been rewritten on both sides
+since the frozen base.
+
+It also inflates every promotion PR. GitHub's three-dot diff replays commits
+already on `main`, so a 3-file change displays as 14 files and +1397/-174. A
+reviewer cannot tell real scope from replayed history, which quietly defeats
+§6.3.
+
+**So: after each production release completes, run**
+
+```sh
+git switch sandbox
+git pull
+git merge origin/main      # fast-forward or a trivial merge commit
+git push
+```
+
+This resets the merge base to the release commit. The next promotion PR then
+shows only its own changes and merges without conflict.
+
+If a conflict does appear during that merge, resolve it **locally**, not in the
+GitHub web editor — for `deploy.yml` specifically, a careless resolution can
+silently reinstate the retired `dev` trigger (#13) or the whole-file
+`.clasp.json` overwrite (#12). After resolving, verify before committing:
+
+```sh
+grep -n "uses:" .github/workflows/deploy.yml        # expected action SHAs
+sed -n '/^on:/,/^permissions:/p' .github/workflows/deploy.yml   # main + sandbox, no dev
+grep -c "jq --arg id" .github/workflows/deploy.yml  # expect 3
+sh scripts/check.sh
+```
+
+Use `git commit --no-edit` to take the prepared merge message and skip the
+editor entirely — a stale `.git/.COMMIT_EDITMSG.swp` from a previously killed
+editor will otherwise block the commit with a vim recovery prompt. That swap
+file is safe to delete when no editor is actually open.
+
+### 7.6 Runner images are pinned, not floating
+
+All four jobs run on `ubuntu-24.04`, not `ubuntu-latest`. The `latest` label
+migrates to Ubuntu 26.04 between 2026-10-19 and 2026-11-19, which would change
+the OS underneath a production deploy with no commit to attribute it to.
+
+Bump the pin deliberately when you choose to, validate it in Sandbox first, and
+keep `verify.yml` on the same image as `deploy.yml` — if they diverge, a green
+`verify` stops predicting a green deploy.
+
 ## 8. Known Constraints Worth Remembering
 
 - **Shared Sandbox.** Both developers deploy to one Sandbox project. Pushing
