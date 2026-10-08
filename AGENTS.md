@@ -50,33 +50,45 @@ Practical consequences:
 
 ## 2. Environments
 
-| Environment | Branch | Approval | Role |
+| Environment | Branch | Deploy approval | Role |
 |---|---|---|---|
 | **Sandbox** | `sandbox` | none | Default validation environment |
-| **PMSC Production** | `main` | required | Live PMSC system |
-| **FCA Production** | `main` | required | Live FCA DAC system |
+| **PMSC Production** | `main` | required (1 reviewer) | Live PMSC system |
+| **FCA Production** | `main` | none — gated by `needs:` | Live FCA DAC system |
 
 Sandbox is the default target for all validation. Nothing reaches production
 without passing through Sandbox first (`PROJECT_PLAN.md` Key Requirement #2).
 
-**Production deploys are gated.** A merge to `main` does not release. The
-`pmsc-production` and `fca-production` GitHub Environments each require
-reviewer approval, so the workflow **pauses** and waits for a human. FCA
-depends on PMSC succeeding, so a PMSC failure leaves both environments on the
-previous version. See `docs/adr/0002-deployment-hardening.md`.
+**Production deploys are gated, but only once.** A merge to `main` does not
+release. The `pmsc-production` environment requires reviewer approval, so the
+workflow **pauses** and waits for a human. Once PMSC succeeds, FCA deploys
+automatically — it has no reviewer rule, but `needs: deploy-pmsc-production`
+means it cannot run if PMSC failed, so a PMSC failure still leaves **both**
+environments on the previous version.
 
-**You cannot approve your own deployment.** `prevent_self_review` is on, so
-whoever merges to `main` must get the *other* developer to approve each
-production deploy. Merging and then finding no approve button is the control
-working, not a bug. Plan releases when both of you are available.
+**You can approve your own deployment.** `prevent_self_review` is off, so
+whoever merges to `main` also approves the release. This is deliberate
+(`docs/adr/0004-one-release-gate.md`): separation of duties is enforced at the
+pull-request gate, where you cannot approve your own change. The deploy gate is
+a *timing* decision — "release now" — and the person doing the release makes it.
 
 Approving a deployment: the paused run appears in the **Actions** tab with a
-"Review deployments" prompt. Select the environment, then **Approve and
-deploy**. Approval is per environment — PMSC and FCA are approved separately.
+"Review deployments" prompt. Select `pmsc-production`, then **Approve and
+deploy**. That is the only approval needed.
+
+**One required approval per change, total.** The `main` pull request needs the
+other developer. Everything after that is yours to drive.
+
+The two production environments stay **separate** even though only one gates on
+a reviewer. Both deploy jobs reference `${{ secrets.SCRIPT_ID }}` by the same
+name and resolve it per environment; merging them into a single `production`
+environment would push PMSC's code twice and never update FCA, with a green
+run. Do not consolidate them.
 
 An admin bypass exists (`can_admins_bypass: true`), matching the
 `enforce_admins: false` posture on `main`. Every use is recorded in the
-repository audit log. Routine use defeats the control.
+repository audit log. Routine use defeats the control — and with the gates
+reduced to one, there is no longer a deadlock that would justify it.
 
 ---
 
@@ -176,17 +188,34 @@ Never publish a draft advisory. They are being used as a private tracker.
 
 ```
 feature/<desc>  or  fix/<desc>
-      │ PR (no review required)
+      │ PR (no review required) — use --auto to self-merge when green
       ▼
    sandbox  ──► GitHub Actions ──► Sandbox Apps Script
       │                                   │
       │                          manual validation
-      │ PR (1 approval REQUIRED)
+      │ PR (1 approval REQUIRED — the only required approval)
       ▼
-    main    ──► GitHub Actions ──► PMSC Prod + FCA Prod
+    main    ──► approve pmsc-production ──► PMSC Prod
+                                      └──► FCA Prod  (automatic, needs:)
+                                      └──► main auto-merged back to sandbox
 ```
 
 Branch naming: `feature/`, `fix/`, `chore/`, `docs/` + short description.
+
+**One required approval per change.** The `main` pull request needs the other
+developer. You merge, you approve the single deploy gate, and the post-release
+`main` → `sandbox` sync runs itself. See
+`docs/adr/0004-one-release-gate.md`.
+
+Use auto-merge so a PR lands the moment its requirements are met instead of
+waiting for someone to come back and click:
+
+```sh
+gh pr merge <n> --auto --merge
+```
+
+Merged head branches are deleted automatically — no `git push origin --delete`
+needed.
 
 ### 6.1 Branch protection in effect
 
@@ -195,18 +224,37 @@ Branch naming: `feature/`, `fix/`, `chore/`, `docs/` + short description.
 | PR required | yes | no |
 | Approvals required | 1 | 0 |
 | Stale approvals dismissed | yes | — |
-| Last push must be approved | yes | — |
+| Last push must be approved | **no** | — |
 | Conversation resolution required | yes | no |
 | Force push | blocked | blocked |
 | Branch deletion | blocked | blocked |
 
 **You cannot approve your own pull request.** A merge to `main` requires the
 other reviewer. Reviewers are Chris Olry (`@clolry`) and Ozel Kirkland
-(`@0zelKirkland` — note the leading character is the digit zero).
+(`@0zelKirkland` — note the leading character is the digit zero). This is the
+separation-of-duties control, and it is not negotiable.
+
+**"Last push must be approved" is deliberately off.** With it on, a PR author
+pushing a routine branch update dismissed the approval *and* excluded the only
+other reviewer as "last pusher" from an earlier merge — a deadlock that
+required an empty commit to break. `dismiss_stale_approvals` already forces a
+fresh review of the current head after any push, so the extra rule added a
+failure mode without adding assurance (ADR-0004).
 
 Admin enforcement is off, so an admin override exists for emergencies. Every
 use is recorded in the repository audit log. Using it routinely defeats the
 control.
+
+### 6.5 Promotion pull requests are approve-on-sight
+
+A promotion PR (`sandbox` → `main`) usually carries the exact diff already
+approved on the sandbox PR. Reviewing the same lines a second time adds no
+information.
+
+So: confirm the promotion diff **equals** what was already approved, then
+approve. Do not re-review substantively.
+
+If the diffs differ, it is not a promotion — give it a full §6.3 review.
 
 ### 6.2 Reviewing and approving a pull request
 
@@ -289,11 +337,25 @@ conditional steps. Expect this pattern:
 |---|---|---|
 | Deploy to Sandbox | success | **skipped** |
 | Deploy to PMSC Production | **skipped** | success *(after approval)* |
-| Deploy to FCA Production | **skipped** | success *(after approval)* |
+| Deploy to FCA Production | **skipped** | success *(automatic)* |
+| Sync main back to sandbox | **skipped** | success |
 
-On a `main` push the two production jobs sit at **"Waiting"** until a reviewer
-approves each one. A run parked there has deployed nothing — that is the gate,
-not a hang.
+On a `main` push **only** `Deploy to PMSC Production` sits at **"Waiting"**,
+until someone approves it. A run parked there has deployed nothing — that is
+the gate, not a hang. FCA then runs unattended, and `Sync main back to sandbox`
+runs after both succeed.
+
+**The run-level status stays `waiting` until every job finishes.** A run can
+read "waiting" while PMSC has already deployed successfully. Check the *jobs*,
+not the run:
+
+```sh
+gh run view <run-id> --json jobs --jq '.jobs[] | {name, conclusion}'
+```
+
+Beware `gh api .../commits/<sha>/check-runs` on a merge commit — it can surface
+the *parent's* results and make an in-progress release look finished. That
+happened on run #54.
 
 If the job that should have run was skipped, the branch condition did not match
 and **nothing was deployed** despite a green run. If PMSC failed, FCA will show
@@ -324,46 +386,51 @@ browser edit. Change code here, commit, and let Actions deploy it.
 
 ### 7.4 Triggers do not survive a fresh deployment
 
-Time-driven triggers (`generateDailyDigest` at 7 AM, deadline reminders at
-6 AM) must be re-initialized manually in the Apps Script editor if a project
-is recreated or copied. See `docs/docs_technical.md` §4.
+Time-driven triggers (deadline reminders via `sendDueDateReminders`, scheduled
+reports via `runScheduledReports`, group-email intake via `processGroupEmails`)
+must be re-initialized manually in the Apps Script editor if a project is
+recreated or copied. See `docs/docs_technical.md` §4.
 
 ---
 
-### 7.5 After a production release, merge `main` back into `sandbox`
+### 7.5 The post-release `main` → `sandbox` sync (now automated)
 
-Promotion PRs are squash-merged, so the commits on `sandbox` never become
-ancestors of `main`. The merge base between the two branches therefore stays
-frozen at whatever commit they last genuinely shared.
+**This is automated.** The `sync-main-to-sandbox` job in `deploy.yml` merges
+`main` back into `sandbox` immediately after *both* production deploys succeed
+(ADR-0004). You should not normally need to do it by hand. What follows is why
+it exists and what to do if that job fails.
 
-The consequence surfaces later, as a **phantom conflict**. Git compares both
-branches against that stale base, sees two independent rewrites of the same
-region, and refuses to merge — even when the branches differ only by the one
-change being promoted. This happened on PR #32: `mergeable_state: dirty` on a
-two-file, +15/-9 diff, because `deploy.yml` had been rewritten on both sides
-since the frozen base.
+Promotion PRs that are squash-merged leave `sandbox`'s commits outside
+`main`'s ancestry, so the merge base between the two branches freezes at the
+last commit they genuinely shared. Two things then go wrong:
 
-It also inflates every promotion PR. GitHub's three-dot diff replays commits
-already on `main`, so a 3-file change displays as 14 files and +1397/-174. A
-reviewer cannot tell real scope from replayed history, which quietly defeats
-§6.3.
+**The next promotion is blocked.** `main` requires branches to be up to date,
+so if `main` holds a commit `sandbox` lacks, the promotion merge is refused
+outright. This happened on PR #36 and cost most of an afternoon: the manual
+merge was missed, the merge was refused, and fixing it dismissed a reviewer
+approval which then collided with the retired "last push must be approved"
+rule.
 
-**So: after each production release completes, run**
+**Promotion PRs inflate.** GitHub's three-dot diff replays commits already on
+`main`, so a 3-file change displayed as 14 files and +1397/−174 on PR #28. A
+reviewer cannot separate real scope from replayed history, which quietly
+defeats §6.3.
+
+If `sync-main-to-sandbox` fails — it reports a conflict and stops rather than
+guessing — do it locally:
 
 ```sh
 git switch sandbox
 git pull
-git merge origin/main      # fast-forward or a trivial merge commit
+git merge origin/main
+git commit --no-edit
 git push
 ```
 
-This resets the merge base to the release commit. The next promotion PR then
-shows only its own changes and merges without conflict.
-
-If a conflict does appear during that merge, resolve it **locally**, not in the
-GitHub web editor — for `deploy.yml` specifically, a careless resolution can
-silently reinstate the retired `dev` trigger (#13) or the whole-file
-`.clasp.json` overwrite (#12). After resolving, verify before committing:
+**Resolve conflicts locally, never in the GitHub web editor.** For
+`deploy.yml` specifically, a careless resolution can silently reinstate the
+retired `dev` trigger (#13) or the whole-file `.clasp.json` overwrite (#12).
+Verify before committing:
 
 ```sh
 grep -n "uses:" .github/workflows/deploy.yml        # expected action SHAs
@@ -373,9 +440,16 @@ sh scripts/check.sh
 ```
 
 Use `git commit --no-edit` to take the prepared merge message and skip the
-editor entirely — a stale `.git/.COMMIT_EDITMSG.swp` from a previously killed
-editor will otherwise block the commit with a vim recovery prompt. That swap
-file is safe to delete when no editor is actually open.
+editor. A stale `.git/.COMMIT_EDITMSG.swp` from a previously killed editor will
+otherwise block the commit with a vim recovery prompt — quitting that prompt
+silently aborts the commit, which then presents as "`git push` says everything
+up-to-date." That swap file is safe to delete when no editor is open.
+
+If `git` keeps failing to open an editor at all, set one:
+
+```sh
+git config --global core.editor nano
+```
 
 ### 7.6 Runner images are pinned, not floating
 

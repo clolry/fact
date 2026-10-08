@@ -24,7 +24,7 @@ function initializeSpokeTabs() {
     const wfTemplateSheet = ss.insertSheet('Workflow_Templates');
     wfTemplateSheet.appendRow(['Template_ID', 'Name', 'Applies_To', 'Steps_JSON', 'Scope']);
     const localTemplates = [
-        ['LOCAL-1', 'Internal Workgroup Review', 'Project, Task', JSON.stringify([{stepNumber: 1, name: "Peer Review", type: "sequential", approvers: [{role: "Peer", resolveBy: "assigned"}], requiredToAdvance: "all"}]), 'Local']
+        ['LOCAL-1', 'Internal Workgroup Review', 'Project, Task', JSON.stringify([{step: 1, role: "Peer Review", type: "Sequential", approvers: [""], status: "Pending"}]), 'Local']
     ];
     wfTemplateSheet.getRange(2, 1, 1, 5).setValues(localTemplates);
   }
@@ -73,8 +73,8 @@ function initializeHubTabs() {
     const wfTemplateSheetMaster = ss.insertSheet('Workflow_Templates');
     wfTemplateSheetMaster.appendRow(['Template_ID', 'Name', 'Applies_To', 'Steps_JSON', 'Scope']);
     const globalTemplates = [
-        ['GLOBAL-1', 'Standard Data Call Review', 'Data Call', JSON.stringify([{stepNumber: 1, name: "Initial Review", type: "sequential", approvers: [{role: "SME", resolveBy: "assigned"}], requiredToAdvance: "all"}]), 'Global'],
-        ['GLOBAL-2', 'Congressional Inquiry', 'Congressional Inquiry', JSON.stringify([{stepNumber: 1, name: "Branch Chief Review", type: "sequential", approvers: [{role: "Branch Chief", resolveBy: "org_lookup"}], requiredToAdvance: "all"}, {stepNumber: 2, name: "Final DAC Review", type: "sequential", approvers: [{role: "DAC", resolveBy: "org_lookup"}], requiredToAdvance: "all"}]), 'Global']
+        ['GLOBAL-1', 'Standard Data Call Review', 'Data Call', JSON.stringify([{step: 1, role: "Initial Review", type: "Sequential", approvers: [""], status: "Pending"}]), 'Global'],
+        ['GLOBAL-2', 'Congressional Inquiry', 'Congressional Inquiry', JSON.stringify([{step: 1, role: "Branch Chief Review", type: "Sequential", approvers: [""], status: "Pending"}, {step: 2, role: "Final DAC Review", type: "Sequential", approvers: [""], status: "Future"}]), 'Global']
     ];
     wfTemplateSheetMaster.getRange(2, 1, 2, 5).setValues(globalTemplates);
   }

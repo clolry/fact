@@ -1121,56 +1121,6 @@ function saveWorkflowTemplate(templateObj, isGlobal) {
   }
 }
 
-function getNextApprovers_(itemData, stepDef) {
-  let approvers = [];
-  stepDef.approvers.forEach(appConfig => {
-    if (appConfig.resolveBy === 'assigned') {
-      if (itemData.Assigned) approvers = approvers.concat(itemData.Assigned.split(',').map(s => s.trim()));
-    } else if (appConfig.resolveBy === 'owner') {
-      approvers.push(itemData.Owner);
-    } else if (appConfig.resolveBy === 'org_lookup') {
-      approvers.push(`lookup_${appConfig.role.replace(/ /g, '_')}@gsa.gov`); // Placeholder for Org_Registry lookup
-    } else if (appConfig.resolveBy === 'fixed') {
-      approvers.push(appConfig.email);
-    }
-  });
-  return approvers;
-}
-
-function checkParallelApprovalComplete_(itemId, stepDef) {
-  // Placeholder: In a real system, query the Approval_Tracking sheet to see 
-  // if all assigned individuals in stepDef have logged an outcome.
-  return true; 
-}
-
-function updateItemWorkflowStep_(itemId, stepNumber, stepName, nextApprovers) {
-  console.log(`Routing ${itemId} to Step ${stepNumber || 'Final'}: ${stepName}. Approvers: ${nextApprovers.join(', ')}`);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const tasksSheet = ss.getSheetByName('Tasks');
-  if (!tasksSheet) return;
-  const data = tasksSheet.getDataRange().getValues();
-  
-  // Find column indices
-  const headers = data[0];
-  const colId = headers.indexOf('ID');
-  const colWfStep = headers.indexOf('WorkflowStep');
-  const colExec = headers.indexOf('ExecStatus');
-  
-  if (colId === -1 || colWfStep === -1 || colExec === -1) return;
-  
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][colId] === itemId) {
-      const rowNum = i + 1;
-      const wfState = stepNumber ? `${stepNumber}:${stepName}:${nextApprovers.join('|')}` : '';
-      const execState = stepNumber ? stepName : 'Approved'; // Or whatever final status we want
-      
-      tasksSheet.getRange(rowNum, colWfStep + 1).setValue(wfState);
-      tasksSheet.getRange(rowNum, colExec + 1).setValue(execState);
-      break;
-    }
-  }
-}
-
 function logWorkflowAction_(itemId, stepNumber, stepName, action, comments, fileId, approvalId) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1182,46 +1132,6 @@ function logWorkflowAction_(itemId, stepNumber, stepName, action, comments, file
   } catch (e) {
     console.error("Failed to log workflow action: " + e.message);
   }
-}
-
-function overrideWorkflowStep_(itemId, newApproverEmail, reason) {
-  // Fetch current task state
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const tasksSheet = ss.getSheetByName('Tasks');
-  if (!tasksSheet) return {success: false, error: "Tasks sheet not found"};
-  const data = tasksSheet.getDataRange().getValues();
-  
-  const headers = data[0];
-  const colId = headers.indexOf('ID');
-  const colWfStep = headers.indexOf('WorkflowStep');
-  
-  let rowNum = -1;
-  let currentWfState = '';
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][colId] === itemId) {
-      rowNum = i + 1;
-      currentWfState = data[i][colWfStep];
-      break;
-    }
-  }
-  
-  if (rowNum === -1 || !currentWfState) return {success: false, error: "Task not found or no active workflow."};
-  
-  // currentWfState = "1:Initial Review:user1@gsa.gov|user2@gsa.gov"
-  const parts = String(currentWfState).split(':');
-  if (parts.length < 3) return {success: false, error: "Invalid workflow state."};
-  
-  const stepNumber = parts[0];
-  const stepName = parts[1];
-  
-  // Override approvers
-  const newState = `${stepNumber}:${stepName}:${newApproverEmail}`;
-  tasksSheet.getRange(rowNum, colWfStep + 1).setValue(newState);
-  
-  // Log it
-  logWorkflowAction_(itemId, stepNumber, stepName, 'OVERRIDE_APPROVER', `Overridden to ${newApproverEmail}. Reason: ${reason}`);
-  
-  return {success: true};
 }
 
 function requestDocApproval(itemId, fileId, approvers, notes) {
