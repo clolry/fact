@@ -178,7 +178,9 @@ All information contained within USAi, if used in connection with this project, 
    Deployment to Google Apps Script must happen through GitHub Actions using `clasp`. Developers must not run routine `clasp push` or `clasp deploy` directly from local machines.
 
 6. **Production Human Approval**  
-   Production deployments to PMSC and FCA require explicit human approval. GitHub Environments with required reviewers are the preferred enforcement mechanism.
+   Production deployments to PMSC and FCA require explicit human approval. GitHub Environments with required reviewers are the enforcement mechanism.
+
+   **Amended 2026-10-08 by [ADR-0004](./docs/adr/0004-one-release-gate.md).** A release is authorized by **one** approval, not four. `pmsc-production` requires a reviewer; `fca-production` does not, because `needs: deploy-pmsc-production` already prevents it running if PMSC failed — so one human decision authorizes the release and `needs:` enforces the ordering. `prevent_self_review` is off, so the person merging to `main` approves the deploy. Separation of duties is enforced at the `main` pull-request gate (Key Requirement #4), where an author cannot approve their own change; the deploy gate is a *timing* control. The prior posture required three approvals from the second developer for every change, which serialized releases on one person's availability and produced two admin bypasses in a single day.
 
 7. **Environment Separation**  
    Sandbox, PMSC production, and FCA production must remain separate Apps Script environments with separate script IDs, deployment IDs, Script Properties, and environment-specific configuration.
@@ -451,18 +453,32 @@ The <code>dev</code> branch has been removed from deployment triggers
 (issue #13).
 
 ### Production Approval
-Production deployments require explicit human approval. As built:
+Production deployments require explicit human approval. As built, amended
+2026-10-08 by ADR-0004:
 
 GitHub Environments in use:
 
 sandbox (no protection rules — validation must stay frictionless)
-pmsc-production (required reviewers)
-fca-production (required reviewers)
+pmsc-production (required reviewers — the single release gate)
+fca-production (no protection rules — gated by needs: in deploy.yml)
 
-Required reviewers on both production environments are Chris Olry and Ozel
-Kirkland, with prevent_self_review enabled. Consequence worth planning around:
-whoever merges to main cannot approve the resulting deployment, so a
-production release needs both developers available.
+Required reviewers on pmsc-production are Chris Olry and Ozel Kirkland, with
+prevent_self_review DISABLED. Whoever merges to main approves the resulting
+deployment, so a release does not need both developers present. The
+separation-of-duties control lives on the main pull request, where an author
+cannot approve their own change.
+
+fca-production has no reviewer rule. It is gated by
+needs: deploy-pmsc-production, so it cannot run unless PMSC succeeded — a PMSC
+failure still leaves both environments on the previous version. One approval
+authorizes the release; needs: enforces the ordering.
+
+The two production environments remain SEPARATE despite only one gating on a
+reviewer. Both deploy jobs reference ${{ secrets.SCRIPT_ID }} and
+${{ secrets.DEPLOYMENT_ID }} by the same names and resolve them per declared
+environment. Collapsing them into a single "production" environment would make
+both jobs resolve the same values: PMSC pushed twice, FCA never updated, run
+green. Do not consolidate them.
 
 can_admins_bypass is true on both production environments, matching the
 enforce_admins:false posture on main. An emergency path exists and every use
