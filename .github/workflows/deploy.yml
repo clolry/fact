@@ -34,7 +34,9 @@ name: Deploy to Google Apps Script
 #                            Deliberately NOT v6/v7: checkout v6.0.0 changed
 #                            credential persistence, and this workflow writes
 #                            .clasprc.json by hand. (issue #27)
-#   8. permissions:          contents: read only.
+#   8. permissions:          contents: read at workflow level. Only
+#                            sync-main-to-sandbox elevates to write, and
+#                            only for that job. (ADR-0004)
 #   9. concurrency:          one deploy per environment at a time; never
 #                            cancels an in-flight production deploy.
 #  10. dev removed:          dev no longer deploys to Sandbox. (issue #13)
@@ -47,6 +49,17 @@ name: Deploy to Google Apps Script
 #                            commit to point at. Bump deliberately, in a
 #                            reviewed diff, after Sandbox proves it.
 #                            (issue #34)
+#  13. one approval gate:    pmsc-production requires a reviewer;
+#                            fca-production does not. FCA is gated by
+#                            needs: instead, so it still cannot run if PMSC
+#                            fails. One human decision authorizes the
+#                            release, not two. The two environments are
+#                            KEPT SEPARATE because both jobs reference
+#                            ${{ secrets.SCRIPT_ID }} by the same name and
+#                            resolve it per environment -- collapsing them
+#                            into one environment would push PMSC's code
+#                            twice and never update FCA, with a green run.
+#                            (ADR-0004)
 #
 # NOTE ON ATOMICITY: Apps Script offers no atomic multi-project deploy. If
 # PMSC succeeds and FCA then fails, the two production environments diverge.
@@ -198,7 +211,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: fca-production    # required reviewers gate this job
+    environment: fca-production    # no required reviewers; gated by needs: (ADR-0004)
     concurrency:
       group: deploy-fca-production
       cancel-in-progress: false
@@ -251,3 +264,63 @@ jobs:
       - name: Remove clasp credentials
         if: always()
         run: rm -f "${HOME}/.clasprc.json"
+
+  # ------------------------------------------------ Post-release branch sync
+  # Promotion PRs merge sandbox -> main. Because main then holds a commit that
+  # sandbox does not, main's "require branches to be up to date" rule blocks
+  # the NEXT promotion until someone merges main back into sandbox by hand.
+  # That manual step was missed and it deadlocked PR #36: sandbox was one
+  # commit behind, the merge was refused, and resolving it dismissed a
+  # reviewer approval.
+  #
+  # This job performs that merge automatically, immediately after BOTH
+  # production environments have deployed successfully. It only ever
+  # fast-forwards or creates a trivial merge commit -- main's content at this
+  # point came from sandbox, so there is nothing to conflict with.
+  #
+  # It deliberately does NOT run if either production deploy failed: in that
+  # case the environments are on different versions and a human should look
+  # before any branch moves.
+  #
+  # Needs contents: write, scoped to this job only. See ADR-0004.
+  sync-main-to-sandbox:
+    name: Sync main back to sandbox
+    needs: [deploy-pmsc-production, deploy-fca-production]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: sync-main-to-sandbox
+      cancel-in-progress: false
+    steps:
+      - name: Checkout sandbox with full history
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          ref: sandbox
+
+      - name: Merge main into sandbox
+        run: |
+          set -eu
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+
+          # Already contains main: nothing to do. Exit 0 so a re-run is safe.
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "sandbox already contains main (${GITHUB_SHA}); nothing to sync."
+            exit 0
+          fi
+
+          # --no-edit never opens an editor. A fast-forward is the expected
+          # and preferred outcome, so --no-ff is deliberately NOT used.
+          if ! git merge --no-edit origin/main; then
+            echo "::error::Merging main into sandbox conflicted. Resolve locally per AGENTS.md 7.5 -- do NOT resolve deploy.yml in the web editor."
+            exit 1
+          fi
+
+          git push origin HEAD:sandbox
+          echo "sandbox synced to include main@${GITHUB_SHA}."

@@ -8,13 +8,11 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# The hardened deploy.yml (merged to `sandbox`, not yet on `main`) stopped
-# hardcoding script and deployment IDs in workflow YAML and now reads them from
-# GitHub *Environment* secrets. Sandbox is proven — run #40 deployed green. The
-# two production environments have NEVER executed the hardened workflow. If a
-# production environment is missing a secret, the fail-closed guards in
-# deploy.yml abort the job, which is the safe outcome but a bad way to discover
-# it: mid-release, with PMSC possibly already pushed.
+# The hardened deploy.yml stopped hardcoding script and deployment IDs in
+# workflow YAML and now reads them from GitHub *Environment* secrets. All three
+# environments have since executed it successfully, so the original "production
+# has never run this" concern is closed. The script is retained because the
+# quieter failure mode below is permanent.
 #
 # There is also a quieter failure mode this checks for. A repository secret is
 # a FALLBACK for an environment that does not define the same name. If
@@ -196,15 +194,31 @@ echo "   credential authorizes all three projects; holding it once means one"
 echo "   thing to rotate. An environment-scoped job resolves repo-level"
 echo "   secrets as a fallback."
 echo
-echo "3. pmsc-production and fca-production must each show a"
-echo "   required_reviewers rule. Without it the approval gate does not exist"
-echo "   and the Increment 2 objective is unmet. sandbox should show no rules."
+echo "3. EXPECTED protection rules as of ADR-0004:"
+echo "     pmsc-production  required_reviewers  <- the one release gate"
+echo "     fca-production   no rules            <- gated by needs: in deploy.yml"
+echo "     sandbox          no rules"
+echo "   fca-production having NO reviewers is correct, not a gap. It cannot"
+echo "   run unless deploy-pmsc-production succeeded, so a PMSC failure still"
+echo "   leaves both environments on the previous version."
 echo
-echo "4. prevent_self_review:true means whoever merges to main CANNOT approve"
-echo "   the resulting production deployment. A second person is required."
-echo "   That is the control working, not a misconfiguration."
+echo "4. prevent_self_review:false on pmsc-production is INTENTIONAL"
+echo "   (ADR-0004). Separation of duties is enforced at the main pull-request"
+echo "   gate, where the author cannot approve their own change. The"
+echo "   deployment gate is a TIMING control -- 'release now' -- and the"
+echo "   person performing the release is the right person to exercise it."
+echo "   Requiring a second person there serialized every release on one"
+echo "   developer's availability without adding an independent review."
 echo
-echo "5. If a deployment branch policy is set, it must permit the deploying"
+echo "5. Both production environments must remain SEPARATE even though only"
+echo "   one gates on a reviewer. Both jobs reference \${{ secrets.SCRIPT_ID }}"
+echo "   by the same name and resolve it per environment. A single shared"
+echo "   'production' environment would make both resolve the SAME value:"
+echo "   PMSC deployed twice, FCA never updated, run GREEN. If either"
+echo "   production environment ever loses its own SCRIPT_ID or"
+echo "   DEPLOYMENT_ID, that is the SHADOWING case above."
+echo
+echo "6. If a deployment branch policy is set, it must permit the deploying"
 echo "   branch (main for production, sandbox for sandbox). No policy means"
 echo "   deploy.yml's ref guard is the only binding — see the note above."
 echo
