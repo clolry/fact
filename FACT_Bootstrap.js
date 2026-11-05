@@ -53,6 +53,21 @@ function getIntakeCount_(ss) {
 }
 
 /**
+ * Returns the timestamp of the last SUCCESSFUL group-email poll, for the
+ * intake view's "Last checked" display.
+ *
+ * Callable from the frontend. It is read-only and touches no mailbox: the
+ * Refresh Queue button must not poll Gmail, because google.script.run executes
+ * as USER_DEPLOYING rather than as the account holding the group mail.
+ *
+ * A stale value here means the time-driven processGroupEmails trigger has
+ * stopped completing cleanly, and is the intended failure signal.
+ */
+function getIntakeLastChecked() {
+  return PropertiesService.getScriptProperties().getProperty('intakeLastChecked') || null;
+}
+
+/**
  * Polls all pending approval requests and advances FACT workflow
  * when approvals are completed.
  * Set a time-driven trigger to run every 15 minutes.
