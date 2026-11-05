@@ -633,7 +633,9 @@ function processGroupEmails() {
   try {
     if (!groupEmailString) {
       console.error("CRITICAL: 'GROUP_EMAIL' script property is not set. Cannot process emails.");
-      return; // Exit early if config is missing
+      // Return the last known-good timestamp, not a fresh one: this is a
+      // failure and must not present as a successful poll.
+      return PropertiesService.getScriptProperties().getProperty('intakeLastChecked');
     }
 
     let logSheet = ss.getSheetByName('Message_Log');
@@ -698,14 +700,24 @@ function processGroupEmails() {
         });
       });
     }
+
+    // The timestamp is written ONLY on a clean pass, and deliberately inside
+    // this try block. It previously ran unconditionally after the catch, so a
+    // swallowed Gmail or authorization error still advanced 'Last checked' and
+    // the UI reported a healthy poll that had in fact scanned nothing. With the
+    // write here, a stale 'Last checked' in the intake view IS the failure
+    // signal — no notification required.
+    finalTimestamp = new Date().toISOString();
+    PropertiesService.getScriptProperties().setProperty('intakeLastChecked', finalTimestamp);
+    console.log(`Email processing complete. Timestamp updated to ${finalTimestamp}`);
+
   } catch (e) {
     console.error(`A critical error occurred during processGroupEmails: ${e.message}`);
+    // Leave 'intakeLastChecked' untouched so the stale value stays visible,
+    // and hand back the last known-good timestamp rather than a fresh one.
+    return PropertiesService.getScriptProperties().getProperty('intakeLastChecked');
   }
 
-  finalTimestamp = new Date().toISOString();
-  PropertiesService.getScriptProperties().setProperty('intakeLastChecked', finalTimestamp);
-  console.log(`Email processing complete. Timestamp updated to ${finalTimestamp}`);
-  
   return finalTimestamp;
 }
 /**

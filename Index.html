@@ -1541,7 +1541,7 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
   <div id="triage-view">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <span id="last-checked-timestamp" style="font-size: 0.85rem; color: #555;">Last checked: Never</span>
-        <button id="btn-run-intake" class="btn-primary" onclick="runIntakeCheck()">🔄 Check for New Emails</button>
+        <button id="btn-run-intake" class="btn-primary" onclick="runIntakeCheck()" aria-label="Refresh the intake queue">🔄 Refresh Queue</button>
     </div> 
     <table class="triage-table">
       <thead><tr><th style="width:130px;">Date / Time</th><th style="width:130px;">Submitted By</th><th>Subject</th><th style="width:160px; text-align:right;"></th></tr></thead>
@@ -5881,33 +5881,39 @@ function loadTimeline() {
         
     }).getSystemTimeline();
 }
+// Refreshes the intake queue from the sheet. It deliberately does NOT poll
+// Gmail: google.script.run executes as USER_DEPLOYING (the GitHub deployer),
+// whose mailbox does not receive the FCA-DAC group mail, so the old
+// .processGroupEmails() call here searched the wrong account and reported
+// success after finding nothing. Gmail polling is owned solely by the
+// time-driven trigger, which runs as the account that created it and does have
+// the group mail. 'Last checked' now reflects that trigger's last clean pass.
 function runIntakeCheck() {
   const btn = document.getElementById('btn-run-intake');
   const originalHtml = btn.innerHTML;
-  
-  btn.innerHTML = 'Checking...';
+
+  btn.innerHTML = 'Refreshing...';
   btn.disabled = true;
 
-  document.getElementById('triage-list').innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color: #555;">Checking for new intake emails...</td></tr>';
+  document.getElementById('triage-list').innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px; color: #555;">Refreshing intake queue...</td></tr>';
 
   google.script.run
-    .withSuccessHandler((newTimestamp) => {
-      console.log("Backend email check complete. Refreshing intake view.");
-      if (newTimestamp) {
-        updateLastCheckedTime(new Date(newTimestamp));
+    .withSuccessHandler((lastChecked) => {
+      if (lastChecked) {
+        updateLastCheckedTime(new Date(lastChecked));
       }
-      btn.innerHTML = originalHtml;
-      btn.disabled = false;
-      loadTriage(); // Refresh just the intake table, don't reload the whole app.
-    })
-    .withFailureHandler((err) => {
-      console.error("Failed to run manual intake check:", err);
-      showAlert("An error occurred while checking for new emails: " + err.message, "Error", "error");
       btn.innerHTML = originalHtml;
       btn.disabled = false;
       loadTriage();
     })
-    .processGroupEmails();
+    .withFailureHandler((err) => {
+      console.error("Failed to refresh intake queue:", err);
+      showAlert("An error occurred while refreshing the intake queue: " + err.message, "Error", "error");
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+      loadTriage();
+    })
+    .getIntakeLastChecked();
 }
 
 function updateLastCheckedTime(time) {
