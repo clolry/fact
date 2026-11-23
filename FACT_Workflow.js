@@ -224,6 +224,8 @@ function getPerformanceReport(startStr, endStr, ownerFilter) {
     const data = sh.getDataRange().getValues();
     const headers = data[0] || [];
     const isProject = name.includes('Project');
+    // Only rows that actually live in an archive sheet can be restored.
+    const isArchived = name.indexOf('_Archive') !== -1;
     
     const statusIdx = headers.indexOf('Status') !== -1 ? headers.indexOf('Status') : 6;
     const ownerIdx = headers.indexOf('Owner') !== -1 ? headers.indexOf('Owner') : (isProject ? 3 : 4);
@@ -263,7 +265,8 @@ function getPerformanceReport(startStr, endStr, ownerFilter) {
            type: row[2],
            owner: rowOwner,
            completed: new Date(doneDate).toLocaleDateString(), 
-           isLate: isLate
+           isLate: isLate,
+           isArchived: isArchived
          });
       }
     }

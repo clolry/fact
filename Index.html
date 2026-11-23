@@ -963,6 +963,12 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
     transition: border-color 0.15s; resize: vertical; min-height: 80px;
 }
 #fact-modal-input:focus { border-color: #1a73e8; outline: none; }
+#fact-modal-select {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1.5px solid #dadce0;
+    border-radius: 8px; font-size: 0.95rem; font-family: inherit; margin-bottom: 16px;
+    background: #fff; color: #202124;
+}
+#fact-modal-select:focus { border-color: #1a73e8; outline: none; }
 #fact-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .fact-modal-btn {
     padding: 9px 22px; border-radius: 8px; border: none; font-size: 0.9rem; font-weight: 600;
@@ -1716,7 +1722,7 @@ th.sort-desc .sort-indicator::after { content: ' ↓'; }
     </div>
     
     <table class="port-table">
-       <thead><tr><th style="width:130px;">Date / Time</th><th style="width:130px;">Action / Health</th><th>Comments</th><th style="width:40px; text-align:right;"></th></tr></thead>
+       <thead><tr><th style="width:110px;" scope="col">Completed</th><th style="width:110px;" scope="col">Type</th><th scope="col">Title</th><th style="width:160px;" scope="col">Owner</th><th style="width:90px;" scope="col">On Time</th><th style="width:110px; text-align:right;" scope="col">Actions</th></tr></thead>
        <tbody id="perf-list"></tbody>
     </table>
 </div>
@@ -5532,7 +5538,7 @@ function renderPortCharts(data) {
        const e = document.getElementById('perf-end').value;
        const o = document.getElementById('perf-owner').value;
        
-       document.getElementById('perf-list').innerHTML = '<tr><td colspan="5">Loading history...</td></tr>';
+       document.getElementById('perf-list').innerHTML = '<tr><td colspan="6">Loading history...</td></tr>';
        
        google.script.run.withSuccessHandler(data => {
           const countEl = document.getElementById('perf-count');
@@ -5545,21 +5551,103 @@ function renderPortCharts(data) {
           if(rateEl) rateEl.textContent = rate + "%";
           
           if(data.length === 0) {
-             document.getElementById('perf-list').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#999;">No completed items found for this period.</td></tr>';
+             document.getElementById('perf-list').innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">No completed items found for this period.</td></tr>';
              return;
           }
 
+          // Restore is server-enforced for ADMIN / EXEC_COORD; hide the control
+          // for anyone else so we are not offering an action that will be refused.
+          const canRestore = (window.userAccessLevel === 'ADMIN' || window.userAccessLevel === 'EXEC_COORD');
+
+          // Text escaping for cell contents. IDs and titles are user-entered,
+          // so they are never interpolated into an inline handler — handlers
+          // take the row index and read from perfRows. An apostrophe in a
+          // title would otherwise break out of the JS string literal, because
+          // the HTML parser decodes &#39; before the JS parser runs.
+          const esc = (v) => String(v == null ? '' : v)
+             .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+          window.perfRows = data;
+
           // UPDATED MAPPING: Added onclick event to the TR
-          document.getElementById('perf-list').innerHTML = data.map(row => `
-             <tr onclick="openForm('${row.id}')" title="Click to view details">
-               <td>${row.completed}</td>
-               <td><span class="tag" style="font-size:0.75rem; color:#444; background:#eee; padding:2px 6px; border-radius:4px;">${row.type}</span></td>
-               <td><strong>${row.title}</strong></td>
-               <td>${row.owner}</td>
-               <td>${row.isLate ? '<span style="color:#d93025; font-weight:bold;">Late</span>' : '<span style="color:#188038;">On Time</span>'}</td>
+          document.getElementById('perf-list').innerHTML = data.map((row, i) => `
+             <tr title="Click to view details">
+               <td onclick="openPerfRow(${i})">${esc(row.completed)}</td>
+               <td onclick="openPerfRow(${i})"><span class="tag" style="font-size:0.75rem; color:#444; background:#eee; padding:2px 6px; border-radius:4px;">${esc(row.type)}</span></td>
+               <td onclick="openPerfRow(${i})"><strong>${esc(row.title)}</strong></td>
+               <td onclick="openPerfRow(${i})">${esc(row.owner)}</td>
+               <td onclick="openPerfRow(${i})">${row.isLate ? '<span style="color:#d93025; font-weight:bold;">Late</span>' : '<span style="color:#188038;">On Time</span>'}</td>
+               <td style="text-align:right;">${
+                 (canRestore && row.isArchived)
+                   ? `<button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem;"
+                        onclick="event.stopPropagation(); performRestore(${i}, this)"
+                        title="Restore ${esc(row.title)} to the active board">&#9851; Restore</button>`
+                   : ''
+               }</td>
              </tr>
           `).join('');
        }).getPerformanceReport(s, e, o);
+    }
+
+    /** Opens the detail modal for a History row by index into perfRows. */
+    function openPerfRow(i) {
+       const row = (window.perfRows || [])[i];
+       if (row) openForm(row.id);
+    }
+
+    /**
+     * Restores an archived item back to the active board. Prompts for the
+     * Status to land in — Done and Cancelled are excluded because the weekly
+     * auto-archive trigger would immediately move the item back.
+     */
+    function performRestore(i, btn) {
+       const row = (window.perfRows || [])[i];
+       if (!row) return;
+
+       const stages = (window.QT1D && QT1D.state && QT1D.state.columns) ? QT1D.state.columns : [];
+       const options = stages.filter(st => st !== 'Done' && st !== 'Cancelled');
+
+       if (options.length === 0) {
+          showAlert("No active stage is available to restore into. Check the configured stages in System Settings.", "Cannot Restore", "error");
+          return;
+       }
+
+       const preferred = options.indexOf('In Progress') !== -1 ? 'In Progress' : options[0];
+
+       showSelectPrompt(
+          `Restore "${row.title}" (${row.id}) to the active board. Choose the status it should land in.`,
+          'Restore From Archive',
+          options,
+          (status) => {
+             if (!status) return;
+
+             const originalText = btn ? btn.textContent : '';
+             if (btn) { btn.textContent = 'Restoring...'; btn.disabled = true; }
+
+             google.script.run.withSuccessHandler(res => {
+                if (res && res.success) {
+                   showToast(`${row.id} restored to ${res.sheet} as "${status}".`, 'success');
+                   if (res.dropped && res.dropped.length) {
+                      showAlert(
+                         `${row.id} was restored to ${res.sheet}, but these archived columns do not exist on the active sheet and were not carried over:\n\n${res.dropped.join(', ')}`,
+                         'Restored With Data Loss', 'warning');
+                   }
+                   loadPerformance();
+                   refreshBoardData();
+                } else {
+                   if (btn) { btn.textContent = originalText; btn.disabled = false; }
+                   showAlert("Restore failed: " + ((res && res.error) || 'Unknown error'), "Restore Failed", "error");
+                }
+             }).withFailureHandler(err => {
+                if (btn) { btn.textContent = originalText; btn.disabled = false; }
+                showAlert("Server Error: " + err.message, "Server Error", "error");
+             }).restoreArchivedItem(row.id, status);
+          },
+          'Restore',
+          'Status to restore into',
+          preferred
+       );
     }
 function checkDoneDate() {
     const status = document.getElementById('f_status').value;
@@ -5630,6 +5718,7 @@ function exportBoard() {
       <div id="fact-modal-title"></div>
       <div id="fact-modal-body"></div>
       <textarea id="fact-modal-input" style="display:none"></textarea>
+      <select id="fact-modal-select" style="display:none"></select>
       <div id="fact-modal-actions"></div>
     </div>`;
   
@@ -5649,6 +5738,8 @@ function exportBoard() {
     setTimeout(() => {
       document.getElementById('fact-modal-input').style.display = 'none';
       document.getElementById('fact-modal-input').value = '';
+      const sel = document.getElementById('fact-modal-select');
+      if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
     }, 200);
   }
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
@@ -5736,6 +5827,49 @@ function exportBoard() {
     actions.appendChild(submitBtn);
     openModal();
     setTimeout(() => input.focus(), 100);
+  };
+
+  /**
+   * Confirm dialog with a required single-select. onSubmit receives the
+   * chosen value, or null if the user cancelled.
+   */
+  window.showSelectPrompt = function(message, title, options, onSubmit, confirmLabel = 'Confirm', selectLabel = 'Select an option', defaultValue = '') {
+    document.getElementById('fact-modal-icon').textContent = '♻️';
+    document.getElementById('fact-modal-title').textContent = title;
+    document.getElementById('fact-modal-body').textContent = message;
+    document.getElementById('fact-modal-input').style.display = 'none';
+
+    const sel = document.getElementById('fact-modal-select');
+    sel.innerHTML = '';
+    sel.setAttribute('aria-label', selectLabel);
+    (options || []).forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt;
+      o.textContent = opt;
+      sel.appendChild(o);
+    });
+    if (defaultValue && (options || []).indexOf(defaultValue) !== -1) sel.value = defaultValue;
+    sel.style.display = 'block';
+
+    const actions = document.getElementById('fact-modal-actions');
+    actions.innerHTML = '';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'fact-modal-btn fact-modal-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => { closeModal(); if (onSubmit) onSubmit(null); };
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'fact-modal-btn fact-modal-btn-primary';
+    submitBtn.textContent = confirmLabel;
+    submitBtn.onclick = () => {
+      const val = sel.value;
+      if (!val) { sel.style.borderColor = '#d93025'; sel.focus(); return; }
+      closeModal();
+      if (onSubmit) onSubmit(val);
+    };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(submitBtn);
+    openModal();
+    setTimeout(() => sel.focus(), 100);
   };
 })();
 

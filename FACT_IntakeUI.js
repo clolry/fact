@@ -327,6 +327,141 @@ function autoArchiveDoneItems() {
   console.log(`Archiving Complete. Total moved: ${totalMoved}`);
 }
 
+/**
+ * Restores a single archived item from an *_Archive sheet back to its active
+ * sheet. This is the inverse of autoArchiveDoneItems().
+ *
+ * Columns are matched BY HEADER NAME, not by position. The active Tasks sheet
+ * is wider than Tasks_Archive at runtime (writeItemToSheet_ self-heals
+ * Primary_Doc_ID / StatusSummaryLog / IntDue onto the active sheet only), and
+ * autoArchiveDoneItems copies by blind column index. Restoring by position
+ * would shift values into the wrong fields.
+ *
+ * The row is written to the active sheet BEFORE it is deleted from the
+ * archive. If the script dies between the two steps the item exists twice —
+ * recoverable — rather than not at all.
+ *
+ * @param {string} itemId The ID of the archived item.
+ * @param {string} newStatus The Status to restore the item into. Must be a
+ *        configured stage and must not be a terminal stage, or the Sunday
+ *        auto-archive trigger would immediately re-archive it.
+ * @returns {{success: boolean, error?: string, sheet?: string, title?: string,
+ *            dropped?: Array<string>}}
+ */
+function restoreArchivedItem(itemId, newStatus) {
+  try {
+    // --- Authorization. Fails closed: getAccessLevel_() returns 'NONE' on error.
+    const access = getAccessLevel_();
+    if (access !== 'ADMIN' && access !== 'EXEC_COORD') {
+      throw new Error('Access Denied. Restoring an archived item requires Admin or Exec Coordinator access.');
+    }
+
+    const id = String(itemId || '').trim();
+    if (!id) throw new Error('No item ID supplied.');
+
+    // --- Validate the requested Status against configured stages.
+    const config = loadConfig_();
+    const stages = config.stages || [];
+    const terminal = ['Done', 'Cancelled'];
+    const status = String(newStatus || '').trim();
+
+    if (!status) throw new Error('A Status is required to restore an item.');
+    if (stages.length && stages.indexOf(status) === -1) {
+      throw new Error(`"${status}" is not a configured stage.`);
+    }
+    if (terminal.indexOf(status) !== -1) {
+      throw new Error(`Cannot restore into "${status}" — the weekly auto-archive would move it straight back.`);
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // Inverse of the `moves` map in autoArchiveDoneItems.
+    const restores = [
+      { source: 'Tasks_Archive', dest: 'Tasks' },
+      { source: 'Projects_Archive', dest: 'Projects' },
+      { source: 'Sub_Tasks_Archive', dest: 'Sub_Tasks' }
+    ];
+
+    for (const r of restores) {
+      const srcSheet = ss.getSheetByName(r.source);
+      const destSheet = ss.getSheetByName(r.dest);
+      if (!srcSheet || !destSheet || srcSheet.getLastRow() < 2) continue;
+
+      const srcHeaders = srcSheet.getRange(1, 1, 1, srcSheet.getLastColumn()).getValues()[0];
+      const srcIdIdx = srcHeaders.indexOf('ID');
+      if (srcIdIdx === -1) continue;
+
+      const srcData = srcSheet.getRange(2, 1, srcSheet.getLastRow() - 1, srcSheet.getLastColumn()).getValues();
+      const offset = srcData.findIndex(row => String(row[srcIdIdx]).trim() === id);
+      if (offset === -1) continue;
+
+      const archivedRow = srcData[offset];
+      const archiveRowNum = offset + 2;
+
+      // Guard against restoring onto a live row with the same ID.
+      const destHeaders = destSheet.getRange(1, 1, 1, destSheet.getLastColumn()).getValues()[0];
+      const destIdIdx = destHeaders.indexOf('ID');
+      if (destIdIdx === -1) throw new Error(`Sheet '${r.dest}' has no ID column.`);
+      if (destSheet.getLastRow() > 1) {
+        const liveIds = destSheet.getRange(2, 1, destSheet.getLastRow() - 1, 1).getValues();
+        if (liveIds.some(row => String(row[0]).trim() === id)) {
+          throw new Error(`${id} already exists in '${r.dest}'. Resolve the duplicate before restoring.`);
+        }
+      }
+
+      // --- Map archive values onto the active sheet BY HEADER NAME.
+      const newRow = new Array(destHeaders.length).fill('');
+      const dropped = [];
+      srcHeaders.forEach((header, i) => {
+        if (!header) return;
+        const destIdx = destHeaders.indexOf(header);
+        if (destIdx === -1) {
+          // Report rather than silently discard.
+          const v = archivedRow[i];
+          if (v !== '' && v !== null && v !== undefined) dropped.push(String(header));
+          return;
+        }
+        newRow[destIdx] = archivedRow[i];
+      });
+
+      const title = destHeaders.indexOf('Title') !== -1 ? newRow[destHeaders.indexOf('Title')] : id;
+      const priorStatus = srcHeaders.indexOf('Status') !== -1 ? archivedRow[srcHeaders.indexOf('Status')] : '';
+
+      // Reactivate: set the chosen Status, clear completion, clear the
+      // Archived flag. Without clearing Archived the row returns to the active
+      // sheet but stays invisible on the board (getProjectsData_ filters it).
+      const setDest = (name, value) => {
+        const idx = destHeaders.indexOf(name);
+        if (idx !== -1) newRow[idx] = value;
+      };
+      setDest('Status', status);
+      setDest('CompletedDate', '');
+      setDest('Archived', '');
+
+      // Write first, then delete. Order matters — see the note above.
+      destSheet.appendRow(newRow);
+      SpreadsheetApp.flush();
+      srcSheet.deleteRow(archiveRowNum);
+
+      // --- Audit. Archiving records nothing today, so this is the only
+      // durable trace that the item made a round trip.
+      const user = Session.getActiveUser().getEmail();
+      let details = `Restored from ${r.source} to ${r.dest}. Status "${priorStatus}" -> "${status}".`;
+      if (dropped.length) details += ` Columns not present in '${r.dest}' were not carried over: ${dropped.join(', ')}.`;
+
+      logActivity_(user, id, title, 'Restored', details);
+      addNote(id, `Restored from the ${r.source} archive and set to "${status}".`, 'System', title);
+
+      return { success: true, sheet: r.dest, title: title, dropped: dropped };
+    }
+
+    throw new Error(`${id} was not found in any archive sheet.`);
+  } catch (e) {
+    console.error(`restoreArchivedItem failed for ${itemId}: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+}
+
 // ==========================================
 // 12. COMBINE INTAKE (MERGE THREADS + COPY NOTE)
 // ==========================================
